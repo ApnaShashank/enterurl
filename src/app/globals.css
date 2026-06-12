@@ -1,0 +1,263 @@
+@import "tailwindcss";
+
+@property --angle {
+  syntax: '<angle>';
+  initial-value: 130deg;
+  inherits: false;
+}
+
+@property --s {
+  syntax: '<length>';
+  initial-value: -15px;
+  inherits: false;
+}
+
+:root {
+  --background: #fcfcfc;
+  --foreground: #1c1c1e;
+  --accent: #7c3aed;
+  --accent-muted: #c084fc;
+  --grid-line: rgba(28, 28, 30, 0.04);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, sans-serif;
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* Vertical Gridlines */
+.gridlines-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 10%;
+}
+
+.gridline {
+  width: 1px;
+  height: 100%;
+  background-color: var(--grid-line);
+}
+
+/* Background Soft Ambient Light (Not neon, just soft subtle shadows) */
+.ambient-glow {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 50vw;
+  height: 50vh;
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.03) 0%, rgba(255, 255, 255, 0) 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Laser Scanner Animation */
+@keyframes scan {
+  0% {
+    top: 0%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    top: 100%;
+    opacity: 0;
+  }
+}
+
+.scanner-line {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  animation: scan 2s linear infinite;
+}
+
+/* Custom transitions and states */
+.custom-card {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(28, 28, 30, 0.06);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.custom-card:hover {
+  border-color: rgba(124, 58, 237, 0.15);
+  box-shadow: 0 15px 35px -10px rgba(124, 58, 237, 0.05);
+}
+
+/* Text Selection Styles */
+::selection {
+  background-color: rgba(124, 58, 237, 0.15);
+  color: var(--accent);
+}
+
+/* Audio Player Customizations */
+audio::-webkit-media-controls-enclosure {
+  background-color: #f4f4f5;
+  border-radius: 9999px;
+}
+
+/* Shaking animation for invalid URL input */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  75% { transform: translateX(6px); }
+}
+
+.animate-shake {
+  animation: shake 0.3s ease-in-out 2;
+}
+
+/* Subtle page fade-in */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Grid Dots pattern as fallback background */
+.dots-bg {
+  background-image: radial-gradient(rgba(28, 28, 30, 0.08) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Connection Line Drawing Animation */
+.draw-line-wrapper {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 48px;
+  overflow: hidden;
+  z-index: 10;
+}
+
+.draw-line-path {
+  width: 2px;
+  height: 100%;
+  background-color: #7c3aed; /* Deep violet accent */
+  transform: scaleY(0);
+  transform-origin: top;
+  animation: drawLineAnim 0.5s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+@keyframes drawLineAnim {
+  0% {
+    transform: scaleY(0);
+  }
+  100% {
+    transform: scaleY(1);
+  }
+}
+
+/* Slide in elements for dynamic scan results */
+@keyframes slideUpIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up-in {
+  animation: slideUpIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Text scan glow */
+.text-scan-glow {
+  text-shadow: 0 0 8px rgba(124, 58, 237, 0.3);
+}
+
+/* User's Glass Button Styles scaled for stats capsule */
+.glass-button-wrapper {
+  position: relative;
+  width: 13rem;
+  height: 3.25rem;
+  display: inline-block;
+  border-radius: 9999px;
+  user-select: none;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-button-wrapper:active {
+  transform: scale(0.95);
+}
+
+.glass-button-wrapper:active .button-text {
+  --s: 10px;
+}
+
+.glass-button-wrapper:active .glass-button {
+  --angle: 30deg;
+}
+
+.glass-button {
+  width: 100%;
+  height: 100%;
+  padding: 1.5px;
+  border: none;
+  border-radius: inherit;
+  background: linear-gradient(var(--angle), rgba(28,28,30,0.4), rgba(250, 250, 250, 0.4) 20% 80%, rgba(28,28,30,0.4));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0) padding-box;
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;  
+  transition: --angle .5s ease;
+}
+
+.button-text {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 0.85rem; 
+  color: white;
+  z-index: 1;
+  box-shadow: 
+    0 4px 12px rgba(0, 0, 0, .15),
+    inset 0 0 4px 1.5px rgba(250, 250, 250, 0.8),
+    inset 0 0 4px 6px rgba(250, 250, 250, .2),
+    inset var(--s) var(--s) 12px 0px rgba(255, 255, 255, .2),
+    inset 0 10px 10px 5px rgba(0, 0, 0, .08);
+  pointer-events: none;
+  transition: --s .2s ease;
+}
+
+.glass-effect {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: transparent;
+  filter: url(#liquid-distortion) contrast(1.2);
+  backdrop-filter: blur(1.5px);
+}
+
+

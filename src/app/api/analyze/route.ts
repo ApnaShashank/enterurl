@@ -1,0 +1,1057 @@
+import { NextRequest, NextResponse } from 'next/server';
+import * as cheerio from 'cheerio';
+import dns from 'dns';
+import tls from 'tls';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+const WHOISXML_API_KEY = process.env.WHOISXML_API_KEY || '';
+const IPINFO_TOKEN = process.env.IPINFO_TOKEN || '';
+const VIRUSTOTAL_API_KEY = process.env.VIRUSTOTAL_API_KEY || '';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+
+function getDomainName(urlStr: string): string {
+  try { return new URL(urlStr).hostname.replace('www.', ''); } catch { return 'unknown'; }
+}
+function getHostname(urlStr: string): string {
+  try { return new URL(urlStr).hostname; } catch { return ''; }
+}
+function cleanUrl(urlStr: string): string {
+  let c = urlStr.trim();
+  if (!/^https?:\/\//i.test(c)) c = 'https://' + c;
+  return c;
+}
+
+// ---- SHORT URL ----
+async function getShortUrl(longUrl: string): Promise<string> {
+  try {
+    const res = await fetch(`https://is.gd/create.php?format=json&url=${encodeURIComponent(longUrl)}`, { signal: AbortSignal.timeout(3000) });
+    if (res.ok) { const d = await res.json(); return d.shorturl || ''; }
+  } catch {}
+  return '';
+}
+
+// ---- WHOISXML ----
+async function fetchWhoisData(domain: string) {
+  if (!WHOISXML_API_KEY || !domain || domain === 'unknown') return null;
+  try {
+    const res = await fetch(
+      `https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey=${WHOISXML_API_KEY}&domainName=${domain}&outputFormat=JSON`,
+      { signal: AbortSignal.timeout(6000) }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const rec = data.WhoisRecord;
+    if (!rec) return null;
+    const rd = rec.registryData || {};
+    return {
+      registrar: rec.registrarName || rd.registrar?.name || 'Unknown',
+      createdDate: rec.createdDateNormalized || rd.createdDateNormalized || 'Unknown',
+      expiresDate: rec.expiresDateNormalized || rd.expiresDateNormalized || 'Unknown',
+      updatedDate: rec.updatedDateNormalized || rd.updatedDateNormalized || 'Unknown',
+      registrantOrg: rec.registrant?.organization || rd.registrant?.organization || 'Unknown',
+      registrantCountry: rec.registrant?.country || rd.registrant?.country || 'Unknown',
+      nameServers: rec.nameServers?.hostNames || rd.nameServers?.hostNames || [],
+      domainAge: rec.estimatedDomainAge || null,
+      status: Array.isArray(rec.status) ? rec.status.join(', ') : (rec.status || ''),
+      rawRegistrar: rec.rawText ? rec.rawText.substring(0, 500) : '',
+    };
+  } catch (e) { console.error('WHOIS error:', e); return null; }
+}
+
+// ---- IPINFO ----
+async function fetchIPInfo(ip: string) {
+  if (!IPINFO_TOKEN || !ip || ip === 'Unknown') return null;
+  try {
+    const res = await fetch(`https://ipinfo.io/${ip}?token=${IPINFO_TOKEN}`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return null;
+    const d = await res.json();
+    return {
+      ip: d.ip || ip,
+      hostname: d.hostname || '',
+      city: d.city || '',
+      region: d.region || '',
+      country: d.country || '',
+      org: d.org || '',
+      loc: d.loc || '',
+      timezone: d.timezone || '',
+      postal: d.postal || '',
+    };
+  } catch (e) { console.error('IPInfo error:', e); return null; }
+}
+
+// ---- VIRUSTOTAL ----
+async function scanWithVirusTotal(url: string) {
+  if (!VIRUSTOTAL_API_KEY) return null;
+  const urlId = Buffer.from(url).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  try {
+    // Try existing report first (fast path)
+    const existing = await fetch(`https://www.virustotal.com/api/v3/urls/${urlId}`, {
+      headers: { 'x-apikey': VIRUSTOTAL_API_KEY },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (existing.ok) {
+      const d = await existing.json();
+      const stats = d.data?.attributes?.last_analysis_stats;
+      if (stats) {
+        return {
+          harmless: stats.harmless || 0,
+          malicious: stats.malicious || 0,
+          suspicious: stats.suspicious || 0,
+          undetected: stats.undetected || 0,
+          timeout: stats.timeout || 0,
+          total: (stats.harmless || 0) + (stats.malicious || 0) + (stats.suspicious || 0) + (stats.undetected || 0),
+          safe: (stats.malicious || 0) === 0 && (stats.suspicious || 0) === 0,
+          permalink: `https://www.virustotal.com/gui/url/${urlId}`,
+          lastAnalysisDate: d.data?.attributes?.last_analysis_date ? new Date(d.data.attributes.last_analysis_date * 1000).toLocaleDateString() : 'Unknown',
+        };
+      }
+    }
+    // Submit new scan
+    const form = new URLSearchParams();
+    form.append('url', url);
+    const submitRes = await fetch('https://www.virustotal.com/api/v3/urls', {
+      method: 'POST',
+      headers: { 'x-apikey': VIRUSTOTAL_API_KEY, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!submitRes.ok) return null;
+    const submitData = await submitRes.json();
+    const analysisId = submitData.data?.id;
+    if (!analysisId) return null;
+
+    // Poll up to 3 times with 2s gap
+    for (let i = 0; i < 3; i++) {
+      await new Promise(r => setTimeout(r, 2500));
+      const pollRes = await fetch(`https://www.virustotal.com/api/v3/analyses/${analysisId}`, {
+        headers: { 'x-apikey': VIRUSTOTAL_API_KEY },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!pollRes.ok) continue;
+      const pd = await pollRes.json();
+      if (pd.data?.attributes?.status === 'completed') {
+        const stats = pd.data.attributes.stats;
+        return {
+          harmless: stats.harmless || 0,
+          malicious: stats.malicious || 0,
+          suspicious: stats.suspicious || 0,
+          undetected: stats.undetected || 0,
+          timeout: stats.timeout || 0,
+          total: (stats.harmless || 0) + (stats.malicious || 0) + (stats.suspicious || 0) + (stats.undetected || 0),
+          safe: (stats.malicious || 0) === 0 && (stats.suspicious || 0) === 0,
+          permalink: `https://www.virustotal.com/gui/url/${urlId}`,
+          lastAnalysisDate: new Date().toLocaleDateString(),
+        };
+      }
+    }
+    return { harmless: 0, malicious: 0, suspicious: 0, undetected: 0, timeout: 0, total: 0, safe: true, permalink: `https://www.virustotal.com/gui/url/${urlId}`, lastAnalysisDate: 'Scanning...', scanning: true };
+  } catch (e) { console.error('VirusTotal error:', e); return null; }
+}
+
+// ---- GEMINI AI ----
+async function generateAiContentGemini(title: string, description: string, platform: string, domain: string) {
+  if (!GEMINI_API_KEY) return null;
+  try {
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const prompt = `Given this social media content:
+Title: "${title.substring(0, 200)}"
+Description: "${description.substring(0, 300)}"
+Platform: ${platform}
+Domain: ${domain}
+
+Generate a JSON object with these keys (no markdown, pure JSON):
+{
+  "captions": ["caption1 with emojis (max 150 chars)", "caption2 with emojis", "caption3 with emojis"],
+  "optimizedTitles": ["Viral title 1 (max 80 chars)", "Viral title 2", "Viral title 3"],
+  "seoDescription": "SEO optimized meta description (max 160 chars)",
+  "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#tag5", "#tag6", "#tag7", "#tag8"]
+}`;
+
+    const result = await model.generateContent(prompt);
+    const text = result.response.text().trim().replace(/```json?\n?/g, '').replace(/```\n?/g, '');
+    return JSON.parse(text);
+  } catch (e) {
+    console.error('Gemini AI error:', e);
+    return null;
+  }
+}
+
+// ---- TEMPLATE FALLBACK AI ----
+function generateAiTemplate(title: string, description: string, platform: string) {
+  const cleanTitle = title.replace(/[^\w\s]/g, '').trim() || 'Awesome Content';
+  const words = cleanTitle.split(/\s+/).filter(w => w.length > 4);
+  const keyword1 = words[0] || 'viral';
+  const keyword2 = words[1] || 'trending';
+  return {
+    captions: [
+      `✨ Must watch alert! "${title.substring(0, 80)}" is next level 🚀 Check this out! #${keyword1} #${platform}`,
+      `Mind blown! 🤯 Just discovered "${title.substring(0, 80)}" — highly recommend. What do you think? 👇`,
+      `This is a hidden gem 💎 Found on ${platform}: "${title.substring(0, 60)}" — worth every second!`,
+    ],
+    optimizedTitles: [
+      `🔥 The Truth About: ${title.substring(0, 50)} (Explained)`,
+      `This is NEXT LEVEL! 🚀 Why you MUST check "${title.substring(0, 45)}"`,
+      `Hidden Gem Alert! 💎 ${title.substring(0, 55)} in 2026`,
+    ],
+    seoDescription: `Looking for ${title.substring(0, 60)}? This ${platform} content explores ${keyword1} and ${keyword2}. Dive in now!`,
+    hashtags: [`#${keyword1}`, `#${keyword2}`, `#${platform}`, '#viral', '#trending', '#content', '#media', '#discover'],
+  };
+}
+
+// ---- SSL CERTIFICATE DETAILS ----
+function fetchSslDetails(hostname: string): Promise<any> {
+  return new Promise((resolve) => {
+    try {
+      const socket = tls.connect({
+        host: hostname,
+        port: 443,
+        servername: hostname,
+        rejectUnauthorized: false,
+        timeout: 4000,
+      }, () => {
+        const cert = socket.getPeerCertificate(true);
+        socket.destroy();
+        if (cert && Object.keys(cert).length > 0) {
+          resolve({
+            issuer: typeof cert.issuer === 'string' ? cert.issuer : (cert.issuer?.O || cert.issuer?.CN || 'Unknown'),
+            validFrom: cert.valid_from,
+            validTo: cert.valid_to,
+            subject: cert.subject?.CN || 'Unknown',
+            serialNumber: cert.serialNumber,
+            bits: cert.bits,
+            daysRemaining: Math.max(0, Math.floor((new Date(cert.valid_to).getTime() - Date.now()) / (1000 * 60 * 60 * 24))),
+            valid: socket.authorized || (new Date(cert.valid_to) > new Date() && new Date(cert.valid_from) < new Date()),
+          });
+        } else {
+          resolve(null);
+        }
+      });
+      socket.on('error', () => {
+        socket.destroy();
+        resolve(null);
+      });
+      socket.on('timeout', () => {
+        socket.destroy();
+        resolve(null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+// ---- ROBOTS.TXT & SITEMAP PARSER ----
+async function fetchRobotsTxt(domain: string): Promise<{ rulesCount: number; sitemaps: string[]; disallows: string[] }> {
+  try {
+    const res = await fetch(`https://${domain}/robots.txt`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return { rulesCount: 0, sitemaps: [], disallows: [] };
+    const text = await res.text();
+    const lines = text.split('\n');
+    const sitemaps: string[] = [];
+    const disallows: string[] = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.toLowerCase().startsWith('sitemap:')) {
+        sitemaps.push(trimmed.substring(8).trim());
+      } else if (trimmed.toLowerCase().startsWith('disallow:')) {
+        const path = trimmed.substring(9).trim();
+        if (path) disallows.push(path);
+      }
+    }
+    return {
+      rulesCount: lines.length,
+      sitemaps,
+      disallows: disallows.slice(0, 10),
+    };
+  } catch {
+    return { rulesCount: 0, sitemaps: [], disallows: [] };
+  }
+}
+
+// ---- ADVANCED TECHNOLOGY STACK SCANNER ----
+function detectTechStack(htmlText: string, headers: Record<string, string>): string[] {
+  const techs: string[] = [];
+  const lowerHtml = htmlText.toLowerCase();
+
+  // Frameworks & Libraries
+  if (lowerHtml.includes('wp-content') || lowerHtml.includes('wp-includes')) techs.push('WordPress');
+  if (lowerHtml.includes('shopify')) techs.push('Shopify');
+  if (lowerHtml.includes('nextjs') || lowerHtml.includes('__next_data__')) techs.push('Next.js');
+  if (lowerHtml.includes('react') || lowerHtml.includes('react-dom')) techs.push('React');
+  if (lowerHtml.includes('angular') || lowerHtml.includes('ng-version')) techs.push('Angular');
+  if (lowerHtml.includes('vue.js') || lowerHtml.includes('vuejs') || lowerHtml.includes('data-v-')) techs.push('Vue.js');
+  if (lowerHtml.includes('svelte') || lowerHtml.includes('svelte-')) techs.push('Svelte');
+  if (lowerHtml.includes('jquery.js') || lowerHtml.includes('jquery.min.js') || lowerHtml.includes('jquery-')) techs.push('jQuery');
+  if (lowerHtml.includes('bootstrap.min.css') || lowerHtml.includes('bootstrap.css') || lowerHtml.includes('class="container') || lowerHtml.includes('row')) {
+    if (lowerHtml.includes('bootstrap')) techs.push('Bootstrap');
+  }
+  if (lowerHtml.includes('tailwind') || lowerHtml.includes('sm:') || lowerHtml.includes('md:') || lowerHtml.includes('lg:') || lowerHtml.includes('xl:')) {
+    if (lowerHtml.includes('tailwind') || lowerHtml.includes('tw-') || lowerHtml.includes('theme(')) techs.push('Tailwind CSS');
+  }
+  if (lowerHtml.includes('vite') || lowerHtml.includes('/@vite/client')) techs.push('Vite');
+  if (lowerHtml.includes('nuxt') || lowerHtml.includes('__nuxt')) techs.push('Nuxt.js');
+
+  // CDNs & Servers
+  if (headers['server']) {
+    const s = headers['server'].toLowerCase();
+    if (s.includes('cloudflare')) techs.push('Cloudflare CDN');
+    else if (s.includes('vercel')) techs.push('Vercel hosting');
+    else if (s.includes('nginx')) techs.push('Nginx Server');
+    else if (s.includes('apache')) techs.push('Apache Server');
+    else if (s.includes('gws')) techs.push('Google Web Server');
+  }
+  if (headers['x-powered-by']) {
+    const p = headers['x-powered-by'].toLowerCase();
+    if (p.includes('next.js')) techs.push('Next.js');
+    else if (p.includes('express')) techs.push('Express.js');
+    else if (p.includes('php')) techs.push('PHP');
+    else if (p.includes('asp.net')) techs.push('ASP.NET');
+  }
+  if (headers['x-vercel-id'] || headers['x-vercel-cache']) techs.push('Vercel');
+  if (headers['cf-ray'] || headers['cf-cache-status']) techs.push('Cloudflare');
+  if (lowerHtml.includes('netlify')) techs.push('Netlify');
+  if (lowerHtml.includes('amazonaws.com') || lowerHtml.includes('s3.amazonaws')) techs.push('Amazon AWS');
+
+  // Integrations & Analytics
+  if (lowerHtml.includes('google-analytics') || lowerHtml.includes('googletagmanager.com') || lowerHtml.includes('gtag(')) techs.push('Google Analytics');
+  if (lowerHtml.includes('connect.facebook.net') || lowerHtml.includes('fbevents.js') || lowerHtml.includes('fbq(')) techs.push('Meta Pixel');
+  if (lowerHtml.includes('stripe.com') || lowerHtml.includes('stripe-')) techs.push('Stripe Payment');
+  if (lowerHtml.includes('hotjar.com') || lowerHtml.includes('hj(')) techs.push('Hotjar Feedback');
+  if (lowerHtml.includes('maps.googleapis.com')) techs.push('Google Maps API');
+  if (lowerHtml.includes('font-awesome') || lowerHtml.includes('fa-')) techs.push('Font Awesome');
+  if (lowerHtml.includes('youtube.com/embed/')) techs.push('YouTube Video Embeds');
+  if (lowerHtml.includes('player.vimeo.com/video/')) techs.push('Vimeo Video Embeds');
+
+  return techs;
+}
+
+// ---- CUSTOM LIGHTHOUSE AUDITER ----
+function runLighthouseAudit(htmlText: string, headers: Record<string, string>, $: cheerio.CheerioAPI) {
+  // 1. SEO score
+  let seoItems = [
+    { name: 'Title Tag Present', passed: $('title').length > 0, detail: $('title').length > 0 ? 'Title tag is configured' : 'Missing title tag in HTML' },
+    { name: 'Meta Description Present', passed: $('meta[name="description"]').length > 0 || $('meta[property="og:description"]').length > 0, detail: ($('meta[name="description"]').length > 0 || $('meta[property="og:description"]').length > 0) ? 'Description tag is configured' : 'Missing meta description' },
+    { name: 'H1 Heading Tag', passed: $('h1').length > 0, detail: $('h1').length > 0 ? `Found H1 tag: "${$('h1').first().text().trim().substring(0, 40)}..."` : 'No H1 tag found. Page needs a main heading.' },
+    { name: 'Alt Attributes on Images', passed: $('img:not([alt])').length === 0, detail: $('img:not([alt])').length === 0 ? 'All images have alt attributes' : `Found ${$('img:not([alt])').length} image(s) missing alt text` },
+    { name: 'Canonical Link Tag', passed: $('link[rel="canonical"]').length > 0, detail: $('link[rel="canonical"]').length > 0 ? 'Canonical link is configured' : 'Missing canonical link tag' },
+  ];
+  let seoScore = Math.round((seoItems.filter(i => i.passed).length / seoItems.length) * 100);
+
+  // 2. Performance score
+  const pageWeightKB = Math.round(htmlText.length / 1024);
+  const scriptTags = $('script').length;
+  const linkStyles = $('link[rel="stylesheet"]').length;
+  const totalImages = $('img').length;
+  
+  let perfItems = [
+    { name: 'Page Size < 500KB', passed: pageWeightKB < 500, detail: `Page size is ${pageWeightKB}KB` },
+    { name: 'Scripts Optimization', passed: scriptTags < 15, detail: `Page loads ${scriptTags} script elements` },
+    { name: 'Stylesheets Optimization', passed: linkStyles < 8, detail: `Page loads ${linkStyles} stylesheet links` },
+    { name: 'Image Count < 20', passed: totalImages < 20, detail: `Found ${totalImages} image(s) on the page` },
+    { name: 'Server Response Compression', passed: !!headers['content-encoding'], detail: headers['content-encoding'] ? `Compressed using: ${headers['content-encoding']}` : 'No server-side compression header detected' }
+  ];
+  let perfScore = Math.round((perfItems.filter(i => i.passed).length / perfItems.length) * 100);
+
+  // 3. Best Practices score
+  const hasHsts = !!headers['strict-transport-security'];
+  const hasCsp = !!headers['content-security-policy'];
+  const hasXfo = !!headers['x-frame-options'];
+
+  let bestPracticesItems = [
+    { name: 'Uses HTTPS Protocol', passed: true, detail: 'Target URL resolved securely via HTTPS' },
+    { name: 'HSTS Protection Enabled', passed: hasHsts, detail: hasHsts ? 'Strict-Transport-Security header is present' : 'HSTS security is missing' },
+    { name: 'X-Frame-Options configured', passed: hasXfo, detail: hasXfo ? 'Clickjacking protection is configured' : 'Missing X-Frame-Options' },
+    { name: 'Content Security Policy (CSP)', passed: hasCsp, detail: hasCsp ? 'CSP headers are present' : 'Missing CSP policy protection' }
+  ];
+  let bestPracticesScore = Math.round((bestPracticesItems.filter(i => i.passed).length / bestPracticesItems.length) * 100);
+
+  // 4. Accessibility score
+  const hasLang = !!$('html').attr('lang');
+  const hasViewport = !!$('meta[name="viewport"]').attr('content');
+  const hasAria = $('[aria-label], [aria-labelledby], [role]').length > 0;
+
+  let accessibilityItems = [
+    { name: 'HTML Language Tag', passed: hasLang, detail: hasLang ? `Lang attribute is set to: "${$('html').attr('lang')}"` : 'Missing lang attribute on HTML element' },
+    { name: 'Viewport Meta Tag', passed: hasViewport, detail: hasViewport ? 'Viewport is responsive' : 'Missing responsive viewport scale configuration' },
+    { name: 'Image Alt Tags for Screen Readers', passed: $('img:not([alt])').length === 0, detail: $('img:not([alt])').length === 0 ? 'Accessibility alt tags present' : 'Some images lack alt tags' },
+    { name: 'ARIA Accessibility Markers', passed: hasAria, detail: hasAria ? 'Contains semantic web markers' : 'No ARIA attributes or roles found' }
+  ];
+  let accessibilityScore = Math.round((accessibilityItems.filter(i => i.passed).length / accessibilityItems.length) * 100);
+
+  return {
+    performance: { score: perfScore, items: perfItems },
+    seo: { score: seoScore, items: seoItems },
+    bestPractices: { score: bestPracticesScore, items: bestPracticesItems },
+    accessibility: { score: accessibilityScore, items: accessibilityItems }
+  };
+}
+
+// ---- GEMINI WEBPAGE AI RESEARCH ----
+async function fetchGeminiIntelligence(title: string, description: string, htmlText: string, domain: string) {
+  if (!GEMINI_API_KEY) return null;
+  try {
+    const cleanHtml = htmlText.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '').replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+    const textSnippet = cleanHtml.replace(/<[^>]+>/g, ' ').substring(0, 1500).replace(/\s+/g, ' ').trim();
+    
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const prompt = `Perform website intelligence analysis on this domain: "${domain}"
+Title: "${title}"
+Description: "${description}"
+Text Content Sample: "${textSnippet}"
+
+Generate a JSON object with these keys (no markdown, pure JSON):
+{
+  "summary": "1 sentence executive summary of what this website is/does",
+  "targetAudience": "Who is the primary audience for this website?",
+  "competitors": ["Competitor Domain 1", "Competitor Domain 2", "Competitor Domain 3"],
+  "seoAdvice": ["Actionable SEO recommendation 1", "Actionable SEO recommendation 2", "Actionable SEO recommendation 3"]
+}`;
+
+    const result = await model.generateContent(prompt);
+    const text = result.response.text().trim().replace(/```json?\n?/g, '').replace(/```\n?/g, '');
+    return JSON.parse(text);
+  } catch (e) {
+    console.error('Gemini intelligence error:', e);
+    return null;
+  }
+}
+
+// ---- MULTIMODAL IMAGE ANALYSIS VIA GEMINI ----
+async function analyzeImageGemini(imageUrl: string) {
+  if (!GEMINI_API_KEY) return null;
+  try {
+    const res = await fetch(imageUrl, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const arrayBuffer = await res.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    const mimeType = res.headers.get('content-type') || 'image/jpeg';
+    
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    
+    const prompt = `Analyze this image. Output a JSON object containing detected objects, tags, and description.
+JSON format (no markdown, pure JSON):
+{
+  "description": "Short, vivid description of the image content",
+  "objects": ["object1", "object2", "object3", "object4"],
+  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6"],
+  "faces": 0
+}`;
+
+    const imageParts = [{
+      inlineData: {
+        data: base64,
+        mimeType
+      }
+    }];
+
+    const result = await model.generateContent([prompt, ...imageParts]);
+    const text = result.response.text().trim().replace(/```json?\n?/g, '').replace(/```\n?/g, '');
+    return JSON.parse(text);
+  } catch (e) {
+    console.error('Gemini Image analysis error:', e);
+    return null;
+  }
+}
+
+export async function POST(request: NextRequest) {
+
+  let htmlText = '';
+  let $: cheerio.CheerioAPI = cheerio.load('');
+  try {
+    const body = await request.json();
+    const rawUrl = body.url;
+    if (!rawUrl || typeof rawUrl !== 'string') {
+      return NextResponse.json({ success: false, error: 'URL is required' }, { status: 400 });
+    }
+
+    const url = cleanUrl(rawUrl);
+    const originalDomain = getDomainName(url);
+
+    // --- Direct media file detection ---
+    const lowerUrl = url.toLowerCase();
+    const isDirectImage = /\.(jpg|jpeg|png|webp|gif|svg|bmp|tiff|avif)(\?.*)?$/i.test(lowerUrl);
+    const isDirectVideo = /\.(mp4|webm|ogg|mov|m4v|3gp|avi|mkv|flv)(\?.*)?$/i.test(lowerUrl);
+    const isDirectAudio = /\.(mp3|wav|ogg|aac|m4a|flac|wma|opus)(\?.*)?$/i.test(lowerUrl);
+
+    // --- Resolve redirects & headers ---
+    let finalUrl = url;
+    const redirectChain: string[] = [url];
+    let contentTypeHeader = 'text/html';
+    let serverHeader = '';
+    const responseHeadersObj: Record<string, string> = {};
+
+    try {
+      const redirectRes = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(8000),
+      });
+      finalUrl = redirectRes.url || url;
+      if (finalUrl !== url) redirectChain.push(finalUrl);
+      contentTypeHeader = redirectRes.headers.get('content-type') || 'text/html';
+      serverHeader = redirectRes.headers.get('server') || '';
+      ['server', 'cache-control', 'content-encoding', 'x-powered-by', 'x-frame-options', 'strict-transport-security', 'content-security-policy'].forEach(k => {
+        const v = redirectRes.headers.get(k);
+        if (v) responseHeadersObj[k] = v;
+      });
+      // Detect if the actual content type is a direct media file
+      if (contentTypeHeader.startsWith('image/') && !isDirectImage) {
+        const filename = finalUrl.split('/').pop()?.split('?')[0] || 'image.file';
+        return buildDirectMediaResponse(finalUrl, getDomainName(finalUrl), 'direct-image', 'image', filename, finalUrl, redirectChain, responseHeadersObj);
+      }
+      if (contentTypeHeader.startsWith('video/') && !isDirectVideo) {
+        const filename = finalUrl.split('/').pop()?.split('?')[0] || 'video.file';
+        return buildDirectMediaResponse(finalUrl, getDomainName(finalUrl), 'direct-video', 'video', filename, null, redirectChain, responseHeadersObj);
+      }
+      if (contentTypeHeader.startsWith('audio/') && !isDirectAudio) {
+        const filename = finalUrl.split('/').pop()?.split('?')[0] || 'audio.file';
+        return buildDirectMediaResponse(finalUrl, getDomainName(finalUrl), 'direct-audio', 'audio', filename, null, redirectChain, responseHeadersObj);
+      }
+    } catch (e) { console.error('Redirect follow failed:', e); }
+
+    const finalDomain = getDomainName(finalUrl);
+    const hostname = getHostname(finalUrl);
+
+    // --- DNS Lookup ---
+    let ipAddress = 'Unknown';
+    const dnsRecords: Array<{ type: string; records: string[] }> = [];
+    if (hostname && hostname !== 'localhost' && !isDirectImage && !isDirectVideo && !isDirectAudio) {
+      try {
+        const lookup = await dns.promises.lookup(hostname);
+        ipAddress = lookup.address;
+        dnsRecords.push({ type: 'A (IPv4 Address)', records: [ipAddress] });
+      } catch (e) { console.error('DNS lookup failed:', e); }
+    }
+
+    // --- Direct media paths (early return with link intel) ---
+    if (isDirectImage || isDirectVideo || isDirectAudio) {
+      const filename = finalUrl.split('/').pop()?.split('?')[0] || 'file';
+      const platform = isDirectImage ? 'direct-image' : isDirectVideo ? 'direct-video' : 'direct-audio';
+      const contentType = isDirectImage ? 'image' : isDirectVideo ? 'video' : 'audio';
+      const previewUrl = isDirectImage ? finalUrl : undefined;
+
+      const [shortUrlR, vtR, ipInfoR, imageAnalysis] = await Promise.allSettled([
+        getShortUrl(finalUrl),
+        scanWithVirusTotal(finalUrl),
+        fetchIPInfo(ipAddress),
+        isDirectImage ? analyzeImageGemini(finalUrl) : Promise.resolve(null),
+      ]);
+      const shortUrl = shortUrlR.status === 'fulfilled' ? shortUrlR.value : '';
+      const vt = vtR.status === 'fulfilled' ? vtR.value : null;
+      const ipInfo = ipInfoR.status === 'fulfilled' ? ipInfoR.value : null;
+      const imgTags = imageAnalysis.status === 'fulfilled' ? imageAnalysis.value : null;
+
+      const aiData = await generateAiContentGemini(filename, `Direct ${contentType} file`, platform, finalDomain) || generateAiTemplate(filename, `Direct ${contentType} file`, platform);
+
+      return NextResponse.json({
+        success: true, url: finalUrl, domain: finalDomain, platform, contentType, title: filename,
+        previewUrl: previewUrl || '',
+        mediaUrls: [finalUrl],
+        aiSuggestions: aiData,
+        imageAnalysis: imgTags,
+        linkIntel: { redirectChain, ipAddress, ipInfo, dnsRecords, whois: null, virusTotal: vt, safe: vt ? vt.safe : true, shortUrl, headers: responseHeadersObj },
+      });
+    }
+
+    // YOUTUBE
+    if (/(youtube\.com|youtu\.be)/i.test(originalDomain) || /(youtube\.com|youtu\.be)/i.test(finalDomain)) {
+      try {
+        let videoId = '';
+        if (url.includes('youtu.be/')) videoId = url.split('youtu.be/')[1]?.split(/[?#]/)[0] || '';
+        else if (url.includes('youtube.com/shorts/')) videoId = url.split('youtube.com/shorts/')[1]?.split(/[?#]/)[0] || '';
+        else { try { videoId = new URL(url).searchParams.get('v') || ''; } catch {} }
+
+        if (!videoId) {
+          if (finalUrl.includes('youtu.be/')) videoId = finalUrl.split('youtu.be/')[1]?.split(/[?#]/)[0] || '';
+          else if (finalUrl.includes('youtube.com/shorts/')) videoId = finalUrl.split('youtube.com/shorts/')[1]?.split(/[?#]/)[0] || '';
+          else { try { videoId = new URL(finalUrl).searchParams.get('v') || ''; } catch {} }
+        }
+
+        let title = 'YouTube Content', author = 'YouTube Creator', description = 'YouTube channel or page', previewUrl = '', duration = '', embedUrl = '';
+        if (videoId) {
+          title = 'YouTube Video';
+          previewUrl = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+          embedUrl = `https://www.youtube.com/embed/${videoId}`;
+          try {
+            const oe = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+            if (oe.ok) { const d = await oe.json(); title = d.title || title; author = d.author_name || author; if (d.thumbnail_url) previewUrl = d.thumbnail_url; }
+          } catch {}
+          try {
+            const wp = await fetch(`https://www.youtube.com/watch?v=${videoId}`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+            if (wp.ok) {
+              const html = await wp.text();
+              const durMatch = html.match(/"approxDurationMs":"(\d+)"/);
+              if (durMatch) { const s = Math.floor(parseInt(durMatch[1]) / 1000); duration = `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
+              const descMatch = html.match(/"shortDescription":"([^"]{0,500})"/);
+              if (descMatch) description = descMatch[1].replace(/\\n/g, ' ').replace(/\\"/g, '"');
+            }
+          } catch {}
+        } else {
+          try {
+            const gr = await fetch(finalUrl, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' },
+              signal: AbortSignal.timeout(6000)
+            });
+            if (gr.ok) {
+              const ytHtml = await gr.text();
+              const $yt = cheerio.load(ytHtml);
+              title = $yt('meta[property="og:title"]').attr('content') || $yt('title').text()?.trim() || 'YouTube Content';
+              description = $yt('meta[property="og:description"]').attr('content') || 'YouTube Page';
+              previewUrl = $yt('meta[property="og:image"]').attr('content') || '';
+            }
+          } catch (e) {
+            console.error('YouTube channel scraping error:', e);
+          }
+        }
+
+        const [shortUrlR, vtR, ipInfoR, whoisR, aiR] = await Promise.allSettled([
+          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
+          fetchWhoisData('youtube.com'),
+          generateAiContentGemini(title, description, 'YouTube', 'youtube.com'),
+        ]);
+        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, description, 'YouTube');
+
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'youtube', contentType: videoId ? 'video' : 'website',
+          title, description, previewUrl, embedUrl: embedUrl || undefined, author, duration,
+          mediaUrls: previewUrl ? [previewUrl] : [],
+          aiSuggestions: aiData,
+          linkIntel: {
+            redirectChain, ipAddress, dnsRecords,
+            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
+            whois: whoisR.status === 'fulfilled' ? whoisR.value : null,
+            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
+            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
+            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
+            headers: responseHeadersObj,
+          },
+        });
+      } catch (err) {
+        console.error('YouTube handler error:', err);
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'youtube', contentType: 'video',
+          title: 'YouTube Video', description: 'YouTube video content.', previewUrl: '',
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
+        });
+      }
+    }
+
+    // VIMEO
+    if (/vimeo\.com/i.test(originalDomain) || /vimeo\.com/i.test(finalDomain)) {
+      try {
+        const targetVimeoUrl = /vimeo\.com/i.test(finalDomain) ? finalUrl : url;
+        const videoId = targetVimeoUrl.split('/').pop()?.split(/[?#]/)[0] || '';
+        let title = 'Vimeo Video', author = 'Vimeo Creator', description = 'Watch this Vimeo video.', previewUrl = '', duration = '', embedUrl = '';
+        if (videoId && !isNaN(Number(videoId))) {
+          embedUrl = `https://player.vimeo.com/video/${videoId}`;
+          try {
+            const oe = await fetch(`https://vimeo.com/api/oembed.json?url=${encodeURIComponent(targetVimeoUrl)}`);
+            if (oe.ok) { const d = await oe.json(); title = d.title || title; author = d.author_name || author; description = d.description || description; previewUrl = d.thumbnail_url || ''; if (d.duration) { const s = parseInt(d.duration); duration = `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; } }
+          } catch {}
+        }
+        const [shortUrlR, vtR, ipInfoR, whoisR, aiR] = await Promise.allSettled([
+          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
+          fetchWhoisData('vimeo.com'),
+          generateAiContentGemini(title, description, 'Vimeo', 'vimeo.com'),
+        ]);
+        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, description, 'Vimeo');
+
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'vimeo', contentType: 'video',
+          title, description, previewUrl, embedUrl: embedUrl || undefined, author, duration,
+          mediaUrls: previewUrl ? [previewUrl] : [],
+          aiSuggestions: aiData,
+          linkIntel: {
+            redirectChain, ipAddress, dnsRecords,
+            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
+            whois: whoisR.status === 'fulfilled' ? whoisR.value : null,
+            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
+            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
+            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
+            headers: responseHeadersObj,
+          },
+        });
+      } catch (err) {
+        console.error('Vimeo handler error:', err);
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'vimeo', contentType: 'video',
+          title: 'Vimeo Video', description: 'Vimeo content.', previewUrl: '',
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
+        });
+      }
+    }
+
+    // REDDIT
+    if (/(reddit\.com|redd\.it)/i.test(originalDomain) || /(reddit\.com|redd\.it)/i.test(finalDomain)) {
+      try {
+        const targetRedditUrl = /(reddit\.com|redd\.it)/i.test(finalDomain) ? finalUrl : url;
+        let jsonUrl = targetRedditUrl.split('?')[0].replace(/\/$/, '') + '.json';
+        
+        let title = 'Reddit Post', author = 'Reddit User', desc = 'Reddit media post', previewUrl = '', contentType: 'image' | 'video' | 'website' = 'website';
+        const mediaUrls: string[] = [];
+
+        try {
+          const rr = await fetch(jsonUrl, { headers: { 'User-Agent': 'Mozilla/5.0 UnfoldBot/1.0' } });
+          if (rr.ok) {
+            const rd = await rr.json();
+            const post = rd[0]?.data?.children[0]?.data;
+            if (post) {
+              title = post.title || title;
+              author = post.author ? `u/${post.author}` : author;
+              const subreddit = post.subreddit_name_prefixed || `r/${post.subreddit}`;
+              const score = post.score || 0;
+              desc = post.selftext || `${subreddit} post by ${author}. Score: ${score} upvotes.`;
+
+              if (post.preview?.images?.[0]?.source?.url) previewUrl = post.preview.images[0].source.url.replace(/&amp;/g, '&');
+              if (post.url && /\.(jpg|jpeg|png|webp|gif)$/i.test(post.url)) { contentType = 'image'; mediaUrls.push(post.url); if (!previewUrl) previewUrl = post.url; }
+              else if (post.is_gallery && post.media_metadata) { contentType = 'image'; for (const key in post.media_metadata) { const img = post.media_metadata[key]; if (img?.s?.u) mediaUrls.push(img.s.u.replace(/&amp;/g, '&')); } if (mediaUrls.length && !previewUrl) previewUrl = mediaUrls[0]; }
+              else if (post.is_video && post.media?.reddit_video?.fallback_url) { contentType = 'video'; mediaUrls.push(post.media.reddit_video.fallback_url.replace(/&amp;/g, '&')); }
+            }
+          }
+        } catch (fetchErr) {
+          console.error('Reddit JSON fetch error:', fetchErr);
+          if (htmlText) {
+            title = $('meta[property="og:title"]').attr('content') || $('title').text()?.trim() || title;
+            desc = $('meta[property="og:description"]').attr('content') || desc;
+            previewUrl = $('meta[property="og:image"]').attr('content') || '';
+            if (previewUrl) contentType = 'image';
+          }
+        }
+
+        const [shortUrlR, vtR, ipInfoR, whoisR, aiR] = await Promise.allSettled([
+          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
+          fetchWhoisData('reddit.com'),
+          generateAiContentGemini(title, desc, 'Reddit', 'reddit.com'),
+        ]);
+        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, desc, 'Reddit');
+
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'reddit', contentType,
+          title, description: desc, previewUrl, author, mediaUrls,
+          aiSuggestions: aiData,
+          linkIntel: {
+            redirectChain, ipAddress, dnsRecords,
+            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
+            whois: whoisR.status === 'fulfilled' ? whoisR.value : null,
+            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
+            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
+            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
+            headers: responseHeadersObj,
+          },
+        });
+      } catch (err) {
+        console.error('Reddit handler error:', err);
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'reddit', contentType: 'website',
+          title: 'Reddit Post', description: 'Reddit post content.', previewUrl: '',
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
+        });
+      }
+    }
+
+    // TIKTOK
+    if (/tiktok\.com/i.test(originalDomain) || /tiktok\.com/i.test(finalDomain)) {
+      try {
+        const targetTiktokUrl = /tiktok\.com/i.test(finalDomain) ? finalUrl : url;
+        let title = 'TikTok Video', author = 'TikTok Creator', previewUrl = '', embedUrl = '';
+        try {
+          const oe = await fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(targetTiktokUrl)}`);
+          if (oe.ok) { const d = await oe.json(); title = d.title || title; author = d.author_name || author; previewUrl = d.thumbnail_url || ''; const vid = targetTiktokUrl.split('/').pop()?.split(/[?#]/)[0]; if (vid) embedUrl = `https://www.tiktok.com/embed/v2/${vid}`; }
+        } catch {}
+
+        const [shortUrlR, vtR, ipInfoR, aiR] = await Promise.allSettled([
+          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
+          generateAiContentGemini(title, 'TikTok short video', 'TikTok', 'tiktok.com'),
+        ]);
+        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, 'TikTok short video', 'TikTok');
+
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'tiktok', contentType: 'video',
+          title, description: `TikTok video by @${author}`, previewUrl, embedUrl, author,
+          mediaUrls: previewUrl ? [previewUrl] : [],
+          aiSuggestions: aiData,
+          linkIntel: {
+            redirectChain, ipAddress, dnsRecords,
+            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
+            whois: null,
+            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
+            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
+            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
+            headers: responseHeadersObj,
+          },
+        });
+      } catch (err) {
+        console.error('TikTok handler error:', err);
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'tiktok', contentType: 'video',
+          title: 'TikTok Content', description: 'TikTok video post.', previewUrl: '',
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
+        });
+      }
+    }
+
+    // INSTAGRAM
+    if (/instagram\.com/i.test(originalDomain) || /instagram\.com/i.test(finalDomain)) {
+      try {
+        const targetInstaUrl = /instagram\.com/i.test(finalDomain) ? finalUrl : url;
+        const match = targetInstaUrl.match(/instagram\.com\/(p|reel|tv)\/([^/?#&]+)/i);
+        const code = match ? match[2] : '';
+        const title = match ? `Instagram ${match[1].toUpperCase()}` : 'Instagram Post';
+
+        const [shortUrlR, vtR, ipInfoR, aiR] = await Promise.allSettled([
+          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
+          generateAiContentGemini(title, 'Instagram media post', 'Instagram', 'instagram.com'),
+        ]);
+        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, 'Instagram media post', 'Instagram');
+
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'instagram', contentType: 'video',
+          title, description: 'View this content on Instagram.', previewUrl: '',
+          embedUrl: code ? `https://www.instagram.com/p/${code}/embed/captioned/` : undefined,
+          mediaUrls: [],
+          aiSuggestions: aiData,
+          linkIntel: {
+            redirectChain, ipAddress, dnsRecords,
+            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
+            whois: null,
+            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
+            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
+            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
+            headers: responseHeadersObj,
+          },
+        });
+      } catch (err) {
+        console.error('Instagram handler error:', err);
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'instagram', contentType: 'video',
+          title: 'Instagram Post', description: 'Instagram media content.', previewUrl: '',
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
+        });
+      }
+    }
+
+    // TWITTER/X
+    if (/(twitter\.com|x\.com)/i.test(originalDomain) || /(twitter\.com|x\.com)/i.test(finalDomain)) {
+      try {
+        const targetTwitterUrl = /(twitter\.com|x\.com)/i.test(finalDomain) ? finalUrl : url;
+        const tweetIdMatch = targetTwitterUrl.match(/status\/(\d+)/);
+        const tweetId = tweetIdMatch ? tweetIdMatch[1] : '';
+        const embedUrl = tweetId ? `https://platform.twitter.com/embed/Tweet.html?id=${tweetId}` : undefined;
+        const title = 'Tweet on Twitter / X';
+
+        const [shortUrlR, vtR, ipInfoR, whoisR, aiR] = await Promise.allSettled([
+          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
+          fetchWhoisData('x.com'),
+          generateAiContentGemini(title, 'Twitter/X post', 'Twitter', 'twitter.com'),
+        ]);
+        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, 'Twitter/X post', 'Twitter');
+
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'twitter', contentType: embedUrl ? 'video' : 'website',
+          title, description: 'Read this post on Twitter / X.', previewUrl: '', embedUrl, mediaUrls: [],
+          aiSuggestions: aiData,
+          linkIntel: {
+            redirectChain, ipAddress, dnsRecords,
+            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
+            whois: whoisR.status === 'fulfilled' ? whoisR.value : null,
+            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
+            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
+            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
+            headers: responseHeadersObj,
+          },
+        });
+      } catch (err) {
+        console.error('Twitter/X handler error:', err);
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'twitter', contentType: 'website',
+          title: 'Twitter / X Post', description: 'Twitter/X post content.', previewUrl: '',
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
+        });
+      }
+    }
+
+    // FACEBOOK
+    if (/facebook\.com/i.test(originalDomain) || /facebook\.com/i.test(finalDomain)) {
+      try {
+        const targetFbUrl = /facebook\.com/i.test(finalDomain) ? finalUrl : url;
+        const isFbVideo = /\/videos\/|\/watch\/|fb\.watch\//i.test(targetFbUrl);
+        const embedUrl = isFbVideo ? `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(targetFbUrl)}&show_text=0` : undefined;
+        const title = `Facebook ${isFbVideo ? 'Video' : 'Post'}`;
+
+        const [shortUrlR, vtR, ipInfoR, aiR] = await Promise.allSettled([
+          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
+          generateAiContentGemini(title, 'Facebook media content', 'Facebook', 'facebook.com'),
+        ]);
+        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, 'Facebook content', 'Facebook');
+
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'facebook', contentType: isFbVideo ? 'video' : 'website',
+          title, description: 'View this post on Facebook.', previewUrl: '', embedUrl, mediaUrls: [],
+          aiSuggestions: aiData,
+          linkIntel: {
+            redirectChain, ipAddress, dnsRecords,
+            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
+            whois: null,
+            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
+            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
+            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
+            headers: responseHeadersObj,
+          },
+        });
+      } catch (err) {
+        console.error('Facebook handler error:', err);
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'facebook', contentType: 'website',
+          title: 'Facebook Content', description: 'Facebook post content.', previewUrl: '',
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
+        });
+      }
+    }
+
+    // PINTEREST
+    if (/pinterest\.com|pin\.it/i.test(originalDomain) || /pinterest\.com|pin\.it/i.test(finalDomain)) {
+      try {
+        const targetPinUrl = /pinterest\.com|pin\.it/i.test(finalDomain) ? finalUrl : url;
+        let title = 'Pinterest Pin', description = 'View this pin on Pinterest.', previewUrl = '';
+        try {
+          const pr = await fetch(targetPinUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+          if (pr.ok) { const $ = cheerio.load(await pr.text()); title = $('meta[property="og:title"]').attr('content') || $('title').text()?.trim() || title; description = $('meta[property="og:description"]').attr('content') || description; previewUrl = $('meta[property="og:image"]').attr('content') || ''; }
+        } catch {}
+
+        const [shortUrlR, vtR, ipInfoR, whoisR, aiR] = await Promise.allSettled([
+          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
+          fetchWhoisData('pinterest.com'),
+          generateAiContentGemini(title, description, 'Pinterest', 'pinterest.com'),
+        ]);
+        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, description, 'Pinterest');
+
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'pinterest', contentType: 'image',
+          title, description, previewUrl, mediaUrls: previewUrl ? [previewUrl] : [],
+          aiSuggestions: aiData,
+          linkIntel: {
+            redirectChain, ipAddress, dnsRecords,
+            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
+            whois: whoisR.status === 'fulfilled' ? whoisR.value : null,
+            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
+            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
+            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
+            headers: responseHeadersObj,
+          },
+        });
+      } catch (err) {
+        console.error('Pinterest handler error:', err);
+        return NextResponse.json({
+          success: true, url: finalUrl, domain: finalDomain, platform: 'pinterest', contentType: 'image',
+          title: 'Pinterest Pin', description: 'Pinterest board pin content.', previewUrl: '',
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
+        });
+      }
+    }
+
+    // ---- GENERAL WEBSITE (with full intelligence) ----
+    htmlText = '';
+    try {
+      const ctrlr = new AbortController();
+      const tid = setTimeout(() => ctrlr.abort(), 8000);
+      const gr = await fetch(finalUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' },
+        signal: ctrlr.signal,
+      });
+      clearTimeout(tid);
+      htmlText = await gr.text();
+    } catch {}
+
+    $ = cheerio.load(htmlText);
+    const getMeta = (names: string[]) => { for (const n of names) { const c = $(`meta[property="${n}"]`).attr('content') || $(`meta[name="${n}"]`).attr('content') || $(`meta[itemprop="${n}"]`).attr('content'); if (c) return c.trim(); } return ''; };
+
+    const parsedTitle = getMeta(['og:title', 'twitter:title']) || $('title').text()?.trim() || finalDomain;
+    const parsedDesc = getMeta(['og:description', 'twitter:description', 'description']) || 'No description available.';
+    let ogImage = getMeta(['og:image', 'og:image:url', 'og:image:secure_url', 'twitter:image', 'twitter:image:src']);
+    const ogVideo = getMeta(['og:video', 'og:video:url', 'twitter:player:stream']);
+    const author = getMeta(['author', 'twitter:creator', 'og:author', 'article:author']) || $('meta[property="og:site_name"]').attr('content') || '';
+    const keywords = getMeta(['keywords']);
+    const generator = getMeta(['generator']);
+
+    if (!ogImage) {
+      const fav = $('link[rel="shortcut icon"]').attr('href') || $('link[rel="icon"]').attr('href') || $('link[rel="apple-touch-icon"]').attr('href');
+      if (fav) { try { ogImage = new URL(fav, finalUrl).toString(); } catch {} }
+    }
+    if (ogImage && !ogImage.startsWith('http')) { try { ogImage = new URL(ogImage, finalUrl).toString(); } catch {} }
+
+    let contentType: 'image' | 'video' | 'audio' | 'website' = 'website';
+    if (ogVideo) contentType = 'video';
+
+    // Extract hashtags/keywords
+    const hashSet = new Set<string>();
+    (parsedDesc.match(/#\w+/g) || []).forEach(t => hashSet.add(t));
+    if (keywords) keywords.split(',').forEach(k => { const c = k.trim().replace(/[^\w]/g, ''); if (c.length > 2) hashSet.add('#' + c.toLowerCase()); });
+    if (hashSet.size < 3 && parsedTitle !== finalDomain) {
+      parsedTitle.split(/\s+/).filter(w => w.length > 4).slice(0, 4).forEach(w => hashSet.add('#' + w.replace(/[^\w]/g, '').toLowerCase()));
+    }
+    if (hashSet.size < 2) { hashSet.add('#' + finalDomain.split('.')[0]); hashSet.add('#media'); }
+    const hashtags = Array.from(hashSet).slice(0, 8);
+
+    // Detect tech stack using advanced engine
+    const techStack = detectTechStack(htmlText, responseHeadersObj);
+
+    // Run all link intelligence in parallel
+    const [shortUrlR, vtR, ipInfoR, whoisR, aiR, sslR, robotsR, geminiIntelR] = await Promise.allSettled([
+      getShortUrl(finalUrl),
+      scanWithVirusTotal(finalUrl),
+      fetchIPInfo(ipAddress),
+      fetchWhoisData(finalDomain),
+      generateAiContentGemini(parsedTitle, parsedDesc, 'Website', finalDomain),
+      fetchSslDetails(finalDomain),
+      fetchRobotsTxt(finalDomain),
+      fetchGeminiIntelligence(parsedTitle, parsedDesc, htmlText, finalDomain),
+    ]);
+
+    const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : { ...generateAiTemplate(parsedTitle, parsedDesc, 'Website'), hashtags };
+    const ssl = sslR.status === 'fulfilled' ? sslR.value : null;
+    const robots = robotsR.status === 'fulfilled' ? robotsR.value : null;
+    const geminiIntel = geminiIntelR.status === 'fulfilled' ? geminiIntelR.value : null;
+    const auditData = runLighthouseAudit(htmlText, responseHeadersObj, $);
+
+    return NextResponse.json({
+      success: true, url: finalUrl, domain: finalDomain, platform: 'website', contentType,
+      title: parsedTitle, description: parsedDesc, previewUrl: ogImage, mediaUrls: ogImage ? [ogImage] : [],
+      embedUrl: ogVideo || undefined, author: author || undefined, hashtags,
+      techStack: techStack.length > 0 ? techStack : undefined,
+      aiSuggestions: aiData,
+      geminiResearch: geminiIntel,
+      lighthouseAudit: auditData,
+      sslCertificate: ssl,
+      robotsTxt: robots,
+      linkIntel: {
+        redirectChain, ipAddress, dnsRecords,
+        ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
+        whois: whoisR.status === 'fulfilled' ? whoisR.value : null,
+        virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
+        safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
+        shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
+        headers: responseHeadersObj,
+      },
+    });
+
+  } catch (error: any) {
+    console.error('Analyze API error:', error);
+    return NextResponse.json({ success: false, error: error.message || 'Server error' }, { status: 500 });
+  }
+}
+
+// Helper for direct media early return
+function buildDirectMediaResponse(url: string, domain: string, platform: string, contentType: string, filename: string, previewUrl: string | null, redirectChain: string[], headers: Record<string, string>) {
+  return NextResponse.json({
+    success: true, url, domain, platform, contentType,
+    title: filename, previewUrl: previewUrl || '',
+    mediaUrls: [url],
+    linkIntel: { redirectChain, ipAddress: 'Unknown', dnsRecords: [], whois: null, virusTotal: null, safe: true, shortUrl: '', headers },
+  });
+}

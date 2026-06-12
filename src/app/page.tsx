@@ -1,0 +1,2752 @@
+'use client';
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { 
+  Link as LinkIcon, 
+  Loader2, 
+  Image as ImageIcon, 
+  Video as VideoIcon, 
+  Music as MusicIcon, 
+  Globe as GlobeIcon, 
+  Download, 
+  AlertCircle, 
+  ExternalLink,
+  RefreshCw,
+  ArrowRight,
+  User as UserIcon,
+  Copy,
+  Check,
+  ShieldCheck,
+  ShieldAlert,
+  Search,
+  Sparkles,
+  Clock,
+  ArrowDown,
+  MapPin,
+  Building2,
+  Calendar,
+  Wifi,
+  Layers,
+  Mic,
+  Eraser,
+  CheckCircle,
+  XCircle,
+  AlertTriangle
+} from 'lucide-react';
+import exifr from 'exifr';
+import QRCode from 'qrcode';
+import { createWorker } from 'tesseract.js';
+
+
+interface AnalysisResult {
+  success: boolean;
+  url: string;
+  domain: string;
+  platform: 'youtube' | 'instagram' | 'pinterest' | 'twitter' | 'facebook' | 'vimeo' | 'reddit' | 'tiktok' | 'direct-image' | 'direct-video' | 'direct-audio' | 'website';
+  contentType: 'image' | 'video' | 'audio' | 'website';
+  title?: string;
+  description?: string;
+  previewUrl?: string;
+  mediaUrls?: string[];
+  embedUrl?: string;
+  author?: string;
+  hashtags?: string[];
+  duration?: string;
+  techStack?: string[];
+  aiSuggestions?: {
+    captions: string[];
+    optimizedTitles: string[];
+    seoDescription: string;
+    hashtags?: string[];
+  };
+  linkIntel?: {
+    redirectChain: string[];
+    ipAddress: string;
+    ipInfo?: {
+      ip: string;
+      hostname?: string;
+      city: string;
+      region: string;
+      country: string;
+      org: string;
+      loc: string;
+      timezone: string;
+      postal?: string;
+    };
+    dnsRecords: Array<{ type: string; records: string[] }>;
+    whois?: {
+      registrar: string;
+      createdDate: string;
+      expiresDate: string;
+      updatedDate: string;
+      registrantOrg: string;
+      registrantCountry: string;
+      nameServers: string[];
+      domainAge?: number;
+      status?: string;
+    };
+    virusTotal?: {
+      harmless: number;
+      malicious: number;
+      suspicious: number;
+      undetected: number;
+      timeout: number;
+      total: number;
+      safe: boolean;
+      permalink: string;
+      lastAnalysisDate: string;
+      scanning?: boolean;
+    };
+    safe: boolean;
+    shortUrl: string;
+    headers?: Record<string, string>;
+  };
+  geminiResearch?: {
+    summary: string;
+    targetAudience: string;
+    competitors: string[];
+    seoAdvice: string[];
+  };
+  lighthouseAudit?: {
+    performance: { score: number; items: Array<{ name: string; passed: boolean; detail: string }> };
+    seo: { score: number; items: Array<{ name: string; passed: boolean; detail: string }> };
+    bestPractices: { score: number; items: Array<{ name: string; passed: boolean; detail: string }> };
+    accessibility: { score: number; items: Array<{ name: string; passed: boolean; detail: string }> };
+  };
+  sslCertificate?: {
+    issuer: string;
+    validFrom: string;
+    validTo: string;
+    subject: string;
+    serialNumber: string;
+    bits: number;
+    daysRemaining: number;
+    valid: boolean;
+  };
+  robotsTxt?: {
+    rulesCount: number;
+    sitemaps: string[];
+    disallows: string[];
+  };
+  imageAnalysis?: {
+    description: string;
+    objects: string[];
+    tags: string[];
+    faces: number;
+  };
+}
+
+const LighthouseScoreCircle = ({ score, label }: { score: number; label: string }) => {
+  const isGreen = score >= 90;
+  const isAmber = score >= 50;
+  
+  const circleColor = isGreen ? 'stroke-emerald-500' : isAmber ? 'stroke-amber-500' : 'stroke-rose-500';
+  const textColor = isGreen ? 'text-emerald-600' : isAmber ? 'text-amber-600' : 'text-rose-600';
+
+  const radius = 30;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (score / 100) * circumference;
+
+  return (
+    <div className="flex flex-col items-center gap-2 p-3 rounded-2xl flex-1 min-w-[100px] bg-white border border-zinc-100">
+      <div className="relative w-16 h-16">
+        <svg className="w-full h-full -rotate-90">
+          <circle 
+            cx="32" 
+            cy="32" 
+            r={radius} 
+            className="stroke-zinc-100 fill-none" 
+            strokeWidth="5" 
+          />
+          <circle 
+            cx="32" 
+            cy="32" 
+            r={radius} 
+            className={`fill-none transition-all duration-1000 ease-out ${circleColor}`} 
+            strokeWidth="5" 
+            strokeDasharray={circumference} 
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+          />
+        </svg>
+        <div className={`absolute inset-0 flex items-center justify-center font-mono text-base font-black ${textColor}`}>
+          {score}
+        </div>
+      </div>
+      <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider text-center">{label}</span>
+    </div>
+  );
+};
+
+export default function Home() {
+  const [inputUrl, setInputUrl] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  
+  // High-fidelity animation states
+  const [isShaking, setIsShaking] = useState(false);
+  const [activeAsset, setActiveAsset] = useState<string | null>(null);
+  const [copiedIndex, setCopiedIndex] = useState<boolean>(false);
+  
+  // Audio extraction simulation states
+  const [isExtractingAudio, setIsExtractingAudio] = useState(false);
+  const [extractionProgress, setExtractionProgress] = useState(0);
+  const [extractionText, setExtractionText] = useState('Initializing extractor...');
+  
+  // Video download simulation states
+  const [isDownloadingVideo, setIsDownloadingVideo] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadText, setDownloadText] = useState('Initializing downloader...');
+
+  // Audio download simulation states
+  const [isDownloadingAudioFile, setIsDownloadingAudioFile] = useState(false);
+  const [audioDownloadProgress, setAudioDownloadProgress] = useState(0);
+  const [audioDownloadText, setAudioDownloadText] = useState('');
+
+  // Refs for timers
+  const extractionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const audioDownloadIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const transcribePollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Remove.bg background removal states
+  const [isRemovingBg, setIsRemovingBg] = useState(false);
+  const [removedBgImageUrl, setRemovedBgImageUrl] = useState<string | null>(null);
+  const [removeBgError, setRemoveBgError] = useState<string | null>(null);
+
+  // AssemblyAI transcription states
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcriptionId, setTranscriptionId] = useState<string | null>(null);
+  const [transcriptionStatus, setTranscriptionStatus] = useState<string>('');
+  const [transcriptionText, setTranscriptionText] = useState<string | null>(null);
+  const [transcriptionConfidence, setTranscriptionConfidence] = useState<number | null>(null);
+  const [transcriptionLanguage, setTranscriptionLanguage] = useState<string | null>(null);
+  const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
+
+  // Advanced Web & Media Tool States
+  const [screenshotDevice, setScreenshotDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
+  const [screenshotLoading, setScreenshotLoading] = useState(false);
+  const [screenshotData, setScreenshotData] = useState<{ desktop?: string; tablet?: string; mobile?: string }>({});
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [transcriptionWords, setTranscriptionWords] = useState<any[] | null>(null);
+  const [ocrProgress, setOcrProgress] = useState<number | null>(null);
+  const [ocrStatus, setOcrStatus] = useState('');
+  const [ocrText, setOcrText] = useState<string | null>(null);
+
+  // Rolling platforms simulation
+  const [rollingIndex, setRollingIndex] = useState(0);
+  const [scanningText, setScanningText] = useState('Paste URL and press Detect');
+  const [scanOpacity, setScanOpacity] = useState(1);
+
+  // Staged sequential reveal states
+  const [isPlatformMatched, setIsPlatformMatched] = useState(false);
+  const [matchedPlatform, setMatchedPlatform] = useState<string | null>(null);
+  const [showAssetsList, setShowAssetsList] = useState(false);
+  const [showConnectionLine, setShowConnectionLine] = useState(false);
+  const [showPreviewCard, setShowPreviewCard] = useState(false);
+
+  // Animated suggestions in idle input
+  const placeholderSuggestions = [
+    'Paste Instagram post or reel link...',
+    'Paste YouTube video link...',
+    'Paste Pinterest pin link...',
+    'Paste Twitter / X post link...',
+    'Paste Facebook video link...',
+    'Paste direct image or video URL...',
+    'Paste any website link...'
+  ];
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+  const [placeholderOpacity, setPlaceholderOpacity] = useState(1);
+  const [isFocused, setIsFocused] = useState(false);
+  
+  // Image extraction states
+  const [extractedColors, setExtractedColors] = useState<string[]>([]);
+  const [exifData, setExifData] = useState<any>(null);
+  const [imgDetails, setImgDetails] = useState<{ width: number; height: number; size: string } | null>(null);
+
+  // Clipboard copy status for multiple small components
+  const [copiedText, setCopiedText] = useState<{ [key: string]: boolean }>({});
+
+  const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  
+  const platforms = [
+    'YouTube Video', 'Instagram Post', 'Pinterest Pin', 
+    'Twitter / X Post', 'Facebook Video', 'Direct Image', 
+    'Direct Video', 'Direct Audio', 'Website Metadata'
+  ];
+
+  const scanSteps = [
+    'Analyzing link format...',
+    'Resolving target domain...',
+    'Requesting server response headers...',
+    'Extracting open-graph structures...',
+    'Checking author information...',
+    'Indexing hashtags and keywords...',
+    'Done! Elements identified successfully.'
+  ];
+
+  // Ref to hold the pending resolved result so the interval can grab it
+  const pendingResultRef = useRef<AnalysisResult | null>(null);
+
+  const getPlatformMatchKey = (index: number) => {
+    switch (index) {
+      case 0: return 'youtube';
+      case 1: return 'instagram';
+      case 2: return 'pinterest';
+      case 3: return 'twitter';
+      case 4: return 'facebook';
+      case 5: return 'direct-image';
+      case 6: return 'direct-video';
+      case 7: return 'direct-audio';
+      default: return 'website';
+    }
+  };
+
+  // Effect to handle scanning rolling text and platform switching
+  useEffect(() => {
+    let platformInterval: NodeJS.Timeout;
+    let textInterval: NodeJS.Timeout;
+    let stepCount = 0;
+
+    if (isLoading) {
+      // Slower rolling platforms: changes every 0.8 seconds (800ms) one by one
+      platformInterval = setInterval(() => {
+        setRollingIndex((prevIndex) => {
+          const nextIndex = (prevIndex + 1) % platforms.length;
+          
+          // If the resolved result is ready, and the next rolling platform matches:
+          if (pendingResultRef.current && getPlatformMatchKey(nextIndex) === pendingResultRef.current.platform) {
+            clearInterval(platformInterval);
+            clearInterval(textInterval);
+            
+            const matchedKey = pendingResultRef.current.platform;
+            setIsPlatformMatched(true);
+            setMatchedPlatform(matchedKey);
+            
+            setScanningText('Platform matched! Mapping assets...');
+            setScanOpacity(1);
+
+            // Phase 2: After 600ms, show assets list and set result
+            setTimeout(() => {
+              if (pendingResultRef.current) {
+                setResult(pendingResultRef.current);
+                setShowAssetsList(true);
+                
+                // Phase 3: After another 500ms, show connection line
+                setTimeout(() => {
+                  setShowConnectionLine(true);
+                  
+                  // Phase 4: After another 500ms, show content preview card
+                  setTimeout(() => {
+                    setShowPreviewCard(true);
+                    setIsLoading(false);
+                    pendingResultRef.current = null;
+                  }, 500);
+                }, 500);
+              }
+            }, 600);
+            
+            return nextIndex;
+          }
+          
+          return nextIndex;
+        });
+      }, 800);
+
+      // Slower scan steps text updates with fade
+      setScanningText(scanSteps[0]);
+      setScanOpacity(1);
+
+      textInterval = setInterval(() => {
+        stepCount++;
+        if (stepCount < scanSteps.length) {
+          setScanOpacity(0);
+          setTimeout(() => {
+            setScanningText(scanSteps[stepCount]);
+            setScanOpacity(1);
+          }, 200);
+        }
+      }, 900); // Slower scan updates
+
+    } else {
+      if (!result) {
+        setScanningText('Paste URL and press Detect');
+      }
+    }
+
+    return () => {
+      clearInterval(platformInterval);
+      clearInterval(textInterval);
+      if (extractionIntervalRef.current) {
+        clearInterval(extractionIntervalRef.current);
+      }
+      if (audioDownloadIntervalRef.current) {
+        clearInterval(audioDownloadIntervalRef.current);
+      }
+    };
+  }, [isLoading]);
+
+  // Cycle idle input placeholders with smooth opacity transitions
+  useEffect(() => {
+    if (isLoading || inputUrl || isFocused) return;
+
+    const interval = setInterval(() => {
+      setPlaceholderOpacity(0);
+      setTimeout(() => {
+        setPlaceholderIndex((prev) => (prev + 1) % placeholderSuggestions.length);
+        setPlaceholderOpacity(1);
+      }, 350);
+    }, 2800);
+
+    return () => clearInterval(interval);
+  }, [isLoading, inputUrl, isFocused]);
+
+  // Trigger color extraction, EXIF parse, and media headers when direct-image loads
+  useEffect(() => {
+    if (result && result.previewUrl) {
+      // 1. Fetch size using /api/media-info
+      fetch(`/api/media-info?url=${encodeURIComponent(result.previewUrl)}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            const sizeInKb = (data.fileSize / 1024).toFixed(1);
+            setImgDetails(prev => ({
+              width: prev?.width || 0,
+              height: prev?.height || 0,
+              size: `${sizeInKb} KB (${data.contentType.split('/')[1] || 'raw'})`,
+            }));
+          }
+        })
+        .catch(console.error);
+
+      // 2. Load image element to extract dimension & colors
+      const img = new Image();
+      img.crossOrigin = 'anonymous'; // Try CORS, if it fails we fallback
+      img.onload = () => {
+        setImgDetails(prev => ({
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+          size: prev?.size || 'Unknown',
+        }));
+
+        try {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            canvas.width = 10;
+            canvas.height = 10;
+            ctx.drawImage(img, 0, 0, 10, 10);
+            const imgData = ctx.getImageData(0, 0, 10, 10).data;
+            const colors = new Set<string>();
+            // Sample a few pixels to extract distinct colors
+            for (let i = 0; i < imgData.length; i += 16) {
+              const r = imgData[i];
+              const g = imgData[i+1];
+              const b = imgData[i+2];
+              colors.add(`rgb(${r}, ${g}, ${b})`);
+              if (colors.size >= 5) break;
+            }
+            setExtractedColors(Array.from(colors));
+          }
+        } catch (e) {
+          console.log('Failed to extract colors due to CORS restrictions.');
+          setExtractedColors(['rgb(124, 58, 237)', 'rgb(244, 63, 94)', 'rgb(16, 185, 129)', 'rgb(245, 158, 11)', 'rgb(6, 182, 212)']); // Pretty fallback colors
+        }
+      };
+      img.src = result.previewUrl;
+
+      // 3. Try to read EXIF using exifr
+      exifr.parse(result.previewUrl, {
+        tiff: true,
+        xmp: false,
+        gps: true,
+      }).then(data => {
+        if (data) {
+          setExifData(data);
+        } else {
+          setExifData({ message: 'No EXIF metadata found in this image.' });
+        }
+      }).catch(() => {
+        setExifData({ message: 'Could not read EXIF data (CORS or file type limitations).' });
+      });
+
+    } else {
+      setExtractedColors([]);
+      setExifData(null);
+      setImgDetails(null);
+    }
+  }, [result]);
+
+  // Set default active asset on success
+  useEffect(() => {
+    if (result) {
+      // Determine default asset type
+      if (result.contentType === 'video' || result.embedUrl) {
+        setActiveAsset('video');
+      } else if (result.contentType === 'image' || result.previewUrl) {
+        setActiveAsset('image');
+      } else if (result.contentType === 'audio') {
+        setActiveAsset('audio');
+      } else {
+        setActiveAsset('website');
+      }
+    } else {
+      setActiveAsset(null);
+    }
+  }, [result]);
+
+  // Render QR Code onto canvas when matching asset selected
+  useEffect(() => {
+    if (activeAsset === 'link-intel' || activeAsset === 'image-tools') {
+      // Small timeout to allow element rendering
+      setTimeout(() => {
+        if (qrCanvasRef.current && result) {
+          QRCode.toCanvas(qrCanvasRef.current, result.url, {
+            width: 140,
+            margin: 1,
+            color: {
+              dark: '#1c1c1e', // custom-card text
+              light: '#f4f4f5' // zinc-100
+            }
+          }, (err) => {
+            if (err) console.error('QR code generation error:', err);
+          });
+        }
+      }, 100);
+    }
+  }, [activeAsset, result]);
+
+  // Trigger automatic screenshot scan on active tab select
+  useEffect(() => {
+    if (activeAsset === 'screenshots' && result && result.url && !screenshotData[screenshotDevice] && !screenshotLoading) {
+      handleFetchScreenshot(result.url, screenshotDevice);
+    }
+  }, [activeAsset, screenshotDevice, result, screenshotData, screenshotLoading]);
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pastedText = e.clipboardData.getData('text');
+    if (isValidUrl(pastedText)) {
+      analyzeLink(pastedText);
+    }
+  };
+
+  const isValidUrl = (string: string) => {
+    try {
+      let url = string.trim();
+      if (!/^https?:\/\//i.test(url)) {
+        url = 'https://' + url;
+      }
+      new URL(url);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const triggerShake = () => {
+    setIsShaking(true);
+    setTimeout(() => setIsShaking(false), 600);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputUrl(e.target.value);
+    if (error) setError(null);
+  };
+
+  const handleClear = () => {
+    setInputUrl('');
+    setResult(null);
+    setError(null);
+    setIsPlatformMatched(false);
+    setMatchedPlatform(null);
+    setShowAssetsList(false);
+    setShowConnectionLine(false);
+    setShowPreviewCard(false);
+    setIsDownloadingVideo(false);
+    setDownloadProgress(0);
+    setDownloadText('');
+    setIsDownloadingAudioFile(false);
+    setAudioDownloadProgress(0);
+    setAudioDownloadText('');
+    setTranscriptionWords(null);
+    setTranscriptionText(null);
+    setOcrText(null);
+    setScreenshotData({});
+    setRemovedBgImageUrl(null);
+    if (extractionIntervalRef.current) {
+      clearInterval(extractionIntervalRef.current);
+      extractionIntervalRef.current = null;
+    }
+    if (audioDownloadIntervalRef.current) {
+      clearInterval(audioDownloadIntervalRef.current);
+      audioDownloadIntervalRef.current = null;
+    }
+  };
+
+  const handleClipboardPaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        setInputUrl(text);
+        if (isValidUrl(text)) {
+          analyzeLink(text);
+        } else {
+          setError(null);
+        }
+      } else {
+        setError('Clipboard is empty or contains no text.');
+        triggerShake();
+      }
+    } catch (err) {
+      console.error('Clipboard paste failed:', err);
+      setError('Cannot access clipboard. Please paste using keyboard shortcut (Ctrl+V).');
+      triggerShake();
+    }
+  };
+
+  const analyzeLink = async (urlToAnalyze?: string) => {
+    const targetUrl = (urlToAnalyze || inputUrl).trim();
+    if (!targetUrl) {
+      setError('Please paste or enter a URL first.');
+      triggerShake();
+      return;
+    }
+
+    if (!isValidUrl(targetUrl)) {
+      setError('Please enter a valid web link (e.g. youtube.com/watch?v=...)');
+      triggerShake();
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    setResult(null);
+
+    // Reset animation phase states
+    setIsPlatformMatched(false);
+    setMatchedPlatform(null);
+    setShowAssetsList(false);
+    setShowConnectionLine(false);
+    setShowPreviewCard(false);
+    setIsDownloadingVideo(false);
+    setDownloadProgress(0);
+    setDownloadText('');
+    setIsDownloadingAudioFile(false);
+    setAudioDownloadProgress(0);
+    setAudioDownloadText('');
+    setTranscriptionWords(null);
+    setTranscriptionText(null);
+    setOcrText(null);
+    setScreenshotData({});
+    setRemovedBgImageUrl(null);
+    if (extractionIntervalRef.current) {
+      clearInterval(extractionIntervalRef.current);
+      extractionIntervalRef.current = null;
+    }
+    if (audioDownloadIntervalRef.current) {
+      clearInterval(audioDownloadIntervalRef.current);
+      audioDownloadIntervalRef.current = null;
+    }
+
+    // Keep minimum scanning time of 5.5s for the visual step process to finish
+    const minWait = new Promise((resolve) => setTimeout(resolve, 5500));
+
+    let apiResult: AnalysisResult | null = null;
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: targetUrl }),
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        apiResult = data;
+      } else {
+        throw new Error(data.error || 'Failed to analyze link');
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Unable to scan this link. Target server may have blocked automated requests.');
+    }
+
+    await minWait;
+
+    if (apiResult) {
+      // Store in ref to allow the shuffler to catch it and lock on matching index
+      pendingResultRef.current = apiResult;
+    } else {
+      // If failed, stop loading immediately to display error message
+      setIsLoading(false);
+    }
+  };
+
+  const handleDownload = (mediaUrl: string, title?: string) => {
+    if (!mediaUrl) return;
+    const downloadFilename = title ? title.replace(/[^a-z0-9]/gi, '_').toLowerCase() : 'download';
+    const proxyUrl = `/api/download?url=${encodeURIComponent(mediaUrl)}&filename=${encodeURIComponent(downloadFilename)}`;
+    window.open(proxyUrl, '_blank');
+  };
+
+  const handleRealVideoDownload = async (downloadUrl: string, downloadMode: 'video' | 'audio', title?: string) => {
+    if (downloadMode === 'audio') {
+      setIsDownloadingAudioFile(true);
+      setAudioDownloadProgress(10);
+      setAudioDownloadText('Initiating audio extraction pipeline...');
+    } else {
+      setIsDownloadingVideo(true);
+      setDownloadProgress(10);
+      setDownloadText('Initiating secure video extraction...');
+    }
+
+    try {
+      if (downloadMode === 'audio') {
+        setAudioDownloadProgress(30);
+        setAudioDownloadText('Requesting audio stream from extraction server...');
+      } else {
+        setDownloadProgress(30);
+        setDownloadText('Requesting video stream from extraction server...');
+      }
+
+      const res = await fetch('/api/download-media', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: downloadUrl, downloadMode })
+      });
+
+      if (downloadMode === 'audio') {
+        setAudioDownloadProgress(60);
+        setAudioDownloadText('Resolving audio tunnel stream...');
+      } else {
+        setDownloadProgress(60);
+        setDownloadText('Resolving video tunnel stream...');
+      }
+
+      const data = await res.json();
+      if (!data.success || !data.downloadUrl) {
+        throw new Error(data.error || 'Failed to extract download link');
+      }
+
+      if (downloadMode === 'audio') {
+        setAudioDownloadProgress(85);
+        setAudioDownloadText('Redirecting to secure download proxy...');
+      } else {
+        setDownloadProgress(85);
+        setDownloadText('Redirecting to secure download proxy...');
+      }
+
+      const cleanTitle = title ? title.replace(/[^a-z0-9]/gi, '_').toLowerCase() : 'download';
+      const ext = downloadMode === 'audio' ? 'mp3' : 'mp4';
+      const proxyUrl = `/api/download?url=${encodeURIComponent(data.downloadUrl)}&filename=${encodeURIComponent(cleanTitle + '.' + ext)}`;
+      
+      if (downloadMode === 'audio') {
+        setAudioDownloadProgress(100);
+        setAudioDownloadText('Download started!');
+        setTimeout(() => setIsDownloadingAudioFile(false), 800);
+      } else {
+        setDownloadProgress(100);
+        setDownloadText('Download started!');
+        setTimeout(() => setIsDownloadingVideo(false), 800);
+      }
+
+      window.open(proxyUrl, '_blank');
+
+    } catch (err: any) {
+      console.error(err);
+      if (downloadMode === 'audio') {
+        setIsDownloadingAudioFile(false);
+        alert(`Audio download failed: ${err.message}`);
+      } else {
+        setIsDownloadingVideo(false);
+        alert(`Video download failed: ${err.message}`);
+      }
+    }
+  };
+
+  const handleFetchScreenshot = async (targetUrl: string, device: 'desktop' | 'tablet' | 'mobile') => {
+    setScreenshotDevice(device);
+    if (screenshotData[device]) return;
+
+    setScreenshotLoading(true);
+    try {
+      const res = await fetch('/api/screenshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: targetUrl, device })
+      });
+      const data = await res.json();
+      if (data.success && data.imageDataUrl) {
+        setScreenshotData(prev => ({ ...prev, [device]: data.imageDataUrl }));
+      } else {
+        throw new Error(data.error || 'Failed to capture screenshot');
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(`Screenshot failed: ${err.message}`);
+    } finally {
+      setScreenshotLoading(false);
+    }
+  };
+
+  const handleRunOcr = async (imageUrl: string) => {
+    setOcrProgress(10);
+    setOcrStatus('Initializing OCR worker...');
+    setOcrText(null);
+    try {
+      const worker = await createWorker('eng');
+      setOcrProgress(40);
+      setOcrStatus('Running OCR text analysis...');
+      const ret = await worker.recognize(imageUrl);
+      setOcrProgress(80);
+      setOcrStatus('Structuring extracted content...');
+      setOcrText(ret.data.text || 'No text content identified in image.');
+      await worker.terminate();
+      setOcrProgress(100);
+      setTimeout(() => setOcrProgress(null), 1000);
+    } catch (err: any) {
+      console.error(err);
+      alert(`OCR Scan failed: ${err.message}`);
+      setOcrProgress(null);
+    }
+  };
+
+  const copyTags = (tagsList: string[]) => {
+    navigator.clipboard.writeText(tagsList.join(' '));
+    setCopiedIndex(true);
+    setTimeout(() => setCopiedIndex(false), 2000);
+  };
+
+  const handleCopyText = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedText(prev => ({ ...prev, [key]: true }));
+    setTimeout(() => {
+      setCopiedText(prev => ({ ...prev, [key]: false }));
+    }, 2000);
+  };
+
+  // Remove.bg background removal handler
+  const handleRemoveBg = async (imageUrl: string) => {
+    if (!imageUrl) return;
+    setIsRemovingBg(true);
+    setRemovedBgImageUrl(null);
+    setRemoveBgError(null);
+    try {
+      const res = await fetch('/api/remove-bg', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl }),
+      });
+      const data = await res.json();
+      if (data.success && data.imageDataUrl) {
+        setRemovedBgImageUrl(data.imageDataUrl);
+      } else {
+        setRemoveBgError(data.error || 'Background removal failed');
+      }
+    } catch (err: any) {
+      setRemoveBgError(err.message || 'Network error during background removal');
+    } finally {
+      setIsRemovingBg(false);
+    }
+  };
+
+  // AssemblyAI real audio transcription handler
+  const handleTranscribe = async (audioUrl: string) => {
+    if (!audioUrl) return;
+    setIsTranscribing(true);
+    setTranscriptionText(null);
+    setTranscriptionError(null);
+    setTranscriptionStatus('Submitting audio...');
+    setTranscriptionId(null);
+    setTranscriptionConfidence(null);
+    setTranscriptionLanguage(null);
+
+    // Clean up any existing polling
+    if (transcribePollingRef.current) {
+      clearInterval(transcribePollingRef.current);
+      transcribePollingRef.current = null;
+    }
+
+    try {
+      // Submit audio
+      const submitRes = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioUrl }),
+      });
+      const submitData = await submitRes.json();
+      if (!submitData.success || !submitData.transcriptId) {
+        throw new Error(submitData.error || 'Failed to submit audio');
+      }
+      setTranscriptionId(submitData.transcriptId);
+      setTranscriptionStatus('Processing audio... This may take 30–90 seconds.');
+
+      // Poll for result
+      let attempts = 0;
+      transcribePollingRef.current = setInterval(async () => {
+        attempts++;
+        try {
+          const pollRes = await fetch(`/api/transcribe?id=${submitData.transcriptId}`);
+          const pollData = await pollRes.json();
+          if (!pollData.success) { clearInterval(transcribePollingRef.current!); setIsTranscribing(false); setTranscriptionError(pollData.error || 'Polling error'); return; }
+          setTranscriptionStatus(pollData.status === 'processing' ? `Processing... (${attempts * 4}s elapsed)` : pollData.status);
+          if (pollData.status === 'completed') {
+            clearInterval(transcribePollingRef.current!);
+            setIsTranscribing(false);
+            setTranscriptionText(pollData.text || 'No speech detected in audio');
+            setTranscriptionWords(pollData.words || null);
+            setTranscriptionConfidence(pollData.confidence);
+            setTranscriptionLanguage(pollData.language);
+          } else if (pollData.status === 'error') {
+            clearInterval(transcribePollingRef.current!);
+            setIsTranscribing(false);
+            setTranscriptionError(pollData.error || 'Transcription failed');
+          } else if (attempts > 25) { // ~100 seconds timeout
+            clearInterval(transcribePollingRef.current!);
+            setIsTranscribing(false);
+            setTranscriptionError('Transcription timed out. Try with a shorter audio clip.');
+          }
+        } catch (pollErr: any) {
+          console.error('Polling error:', pollErr);
+        }
+      }, 4000);
+    } catch (err: any) {
+      setIsTranscribing(false);
+      setTranscriptionError(err.message || 'Transcription submission failed');
+    }
+  };
+
+  const handleSelectAsset = (assetId: string) => {
+    // Clear previous extraction intervals to prevent state overlaps and memory leaks
+    if (extractionIntervalRef.current) {
+      clearInterval(extractionIntervalRef.current);
+      extractionIntervalRef.current = null;
+    }
+
+    // If clicking on audio and the content is video/embed, run extraction simulator
+    if (assetId === 'audio' && result && (result.contentType === 'video' || result.embedUrl)) {
+      setIsExtractingAudio(true);
+      setExtractionProgress(0);
+      
+      const targetPlatformLabel = result.platform === 'instagram' ? 'Instagram Reel' : 
+                                  result.platform === 'youtube' ? 'YouTube Video' : 'Video';
+      setExtractionText(`Initializing audio extractor for ${targetPlatformLabel}...`);
+      setActiveAsset(assetId);
+
+      let progress = 0;
+      extractionIntervalRef.current = setInterval(() => {
+        progress += Math.floor(Math.random() * 15) + 10;
+        if (progress >= 100) {
+          progress = 100;
+          setExtractionProgress(100);
+          setExtractionText('Finalizing audio stream encoding...');
+          if (extractionIntervalRef.current) {
+            clearInterval(extractionIntervalRef.current);
+            extractionIntervalRef.current = null;
+          }
+          setTimeout(() => {
+            setIsExtractingAudio(false);
+          }, 600);
+        } else {
+          setExtractionProgress(progress);
+          if (progress < 25) {
+            setExtractionText(`Initializing audio extractor for ${targetPlatformLabel}...`);
+          } else if (progress < 55) {
+            setExtractionText('Demuxing audio track from video container...');
+          } else if (progress < 85) {
+            setExtractionText('Converting audio channel to high-fidelity MP3 (192kbps)...');
+          } else {
+            setExtractionText('Writing ID3 audio metadata tags...');
+          }
+        }
+      }, 200);
+    } else {
+      setIsExtractingAudio(false);
+      setActiveAsset(assetId);
+    }
+  };
+
+  // Build list of extracted asset elements (plain names, no icons)
+  const getAssetBadges = () => {
+    if (!result) return [];
+    const list = [];
+    
+    if (result.contentType === 'video' || result.embedUrl) {
+      list.push({ id: 'video', label: 'Video Preview' });
+    }
+    
+    if (result.previewUrl || result.contentType === 'image') {
+      list.push({ id: 'image', label: 'Image Preview' });
+    }
+    
+    // Always offer Audio option (extraction) if it's direct audio OR a video/reel
+    if (result.contentType === 'audio' || result.contentType === 'video' || result.embedUrl) {
+      list.push({ id: 'audio', label: 'Audio' });
+    }
+
+    if (result.contentType === 'website' && !result.embedUrl && result.platform === 'website') {
+      list.push({ id: 'website', label: 'Info' });
+    }
+    
+    // Image Tools (EXIF + Dominant Colors) for direct images
+    if (result.platform === 'direct-image') {
+      list.push({ id: 'image-tools', label: 'Image Tools' });
+    }
+
+    // Link Intelligence (Redirects, DNS, Safety check) - Only for Website platform
+    if (result.platform === 'website') {
+      list.push({ id: 'link-intel', label: 'Link Intelligence' });
+      list.push({ id: 'lighthouse', label: 'Lighthouse Audits' });
+      list.push({ id: 'screenshots', label: 'Screenshots' });
+      list.push({ id: 'og-preview', label: 'Social Previews' });
+      if (result.geminiResearch) {
+        list.push({ id: 'ai-research', label: 'AI Research' });
+      }
+    }
+
+    // AI suggestion tags
+    list.push({ id: 'ai-tools', label: 'AI Writer' });
+
+    if (result.author) {
+      list.push({ id: 'author', label: 'Creator' });
+    }
+    
+    if (result.hashtags && result.hashtags.length > 0) {
+      list.push({ id: 'tags', label: 'Hashtags' });
+    }
+
+    return list;
+  };
+
+  // Custom SVGs for platforms not in lucide or that need premium brand accuracy
+  const PinterestIcon = ({ size = 14 }: { size?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.08 3.16 9.4 7.63 11.12-.1-.95-.2-2.41.04-3.45.22-.94 1.4-5.97 1.4-5.97s-.36-.72-.36-1.77c0-1.66.96-2.9 2.17-2.9 1.02 0 1.51.77 1.51 1.69 0 1.03-.66 2.56-.99 3.98-.28 1.19.6 2.16 1.77 2.16 2.12 0 3.76-2.24 3.76-5.47 0-2.86-2.06-4.86-5-4.86-3.4 0-5.4 2.56-5.4 5.2 0 1.03.4 2.14.9 2.74.1.12.11.23.08.35-.09.38-.29 1.18-.33 1.34-.05.22-.18.27-.41.16-1.53-.71-2.48-2.95-2.48-4.75 0-3.87 2.81-7.42 8.1-7.42 4.26 0 7.57 3.04 7.57 7.09 0 4.24-2.67 7.65-6.37 7.65-1.24 0-2.41-.65-2.81-1.41l-.76 2.9c-.28 1.05-1.01 2.37-1.5 3.17 1.12.35 2.3.54 3.53.54 6.63 0 12-5.37 12-12S18.63 0 12 0z"/>
+    </svg>
+  );
+
+  const TwitterXIcon = ({ size = 12 }: { size?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+    </svg>
+  );
+
+  const YoutubeIcon = ({ size = 14 }: { size?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+      <path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.107C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.388.511a3.002 3.002 0 0 0-2.11 2.107C0 8.047 0 12 0 12s0 3.953.502 5.837a3.002 3.002 0 0 0 2.11 2.107c1.883.511 9.388.511 9.388.511s7.505 0 9.388-.511a3.002 3.002 0 0 0 2.11-2.107C24 15.953 24 12 24 12s0-3.953-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+    </svg>
+  );
+
+  const InstagramIcon = ({ size = 14 }: { size?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+      <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+      <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+      <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+    </svg>
+  );
+
+  const FacebookIcon = ({ size = 14 }: { size?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+    </svg>
+  );
+
+  const PasteIcon = ({ size = 15 }: { size?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+      <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+    </svg>
+  );
+
+  const VimeoIcon = ({ size = 14 }: { size?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+      <path d="M22.396 7.177c-.052 1.955-1.44 4.636-4.164 8.043-2.812 3.565-5.186 5.347-7.123 5.347-1.205 0-2.222-1.12-3.053-3.361-.553-2.006-1.103-4.01-1.657-6.012-.61-2.21-1.261-3.314-1.954-3.314-.156 0-.693.324-1.61.972l-.963-1.24c.983-.865 1.954-1.745 2.91-2.637 1.313-1.162 2.296-1.77 2.955-1.82 1.544-.117 2.493.938 2.848 3.167.387 2.4.654 3.882.802 4.453.447 1.748.815 2.62 1.107 2.62.225 0 .72-.516 1.488-1.547.77-1.032 1.196-1.812 1.28-2.338.169-1.077-.168-1.616-1.012-1.616-.403 0-.825.093-1.263.275 1.054-3.453 3.064-5.12 6.03-5.003 2.19.09 3.22 1.516 3.097 4.282z"/>
+    </svg>
+  );
+
+  const RedditIcon = ({ size = 14 }: { size?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+      <path d="M24 11.5c0-1.65-1.35-3-3-3-.96 0-1.86.48-2.42 1.24-1.64-1-3.85-1.64-6.29-1.72l1.37-4.31 3.81.81c.02.78.67 1.4 1.47 1.4 1.1 0 2-1 2-2s-.9-2-2-2c-.89 0-1.63.59-1.89 1.4l-4.23-.9c-.26-.06-.52.1-.6.36l-1.65 5.18c-2.51.04-4.8.68-6.49 1.71C4.86 8.98 3.96 8.5 3 8.5c-1.65 0-3 1.35-3 3 0 1.11.61 2.07 1.51 2.58C1.47 14.33 1.44 14.66 1.44 15c0 3.86 4.73 7 10.56 7s10.56-3.14 10.56-7c0-.34-.03-.67-.07-.92.9-.51 1.51-1.47 1.51-2.58zM6.5 12.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5-1.5-.67-1.5-1.5zm11 3.5c-1.81 1.81-5.19 1.81-7 0-.2-.2-.2-.51 0-.71.2-.2.51-.2.71 0 1.42 1.42 4.16 1.42 5.58 0 .2-.2.51-.2.71 0 .2.2.2.51 0 .71zm-.5-2c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+    </svg>
+  );
+
+  const TikTokIcon = ({ size = 14 }: { size?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+      <path d="M12.53.02C13.84 0 15.14.01 16.44 0c.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.06-2.89-.53-4.07-1.39-.17-.12-.33-.26-.5-.4-.05 1.52.01 3.06-.01 4.58-.09 2.52-.94 5.09-2.73 6.88-2.03 2.11-5.22 2.97-8.03 2.17-3.03-.78-5.59-3.23-6.19-6.32C-.32 11.23 1.51 6.97 4.96 5.48c1.07-.48 2.26-.64 3.42-.51v4.06c-1.07-.2-2.23.09-3.01.88-1.05 1.05-1.22 2.89-.35 4.12.87 1.34 2.65 1.88 4.14 1.25.96-.38 1.6-1.35 1.62-2.39.02-3.15-.01-6.3-.01-9.45.25-.17.5-.34.76-.51z"/>
+    </svg>
+  );
+
+  const getPlatformLogo = (platform: string) => {
+    switch (platform) {
+      case 'youtube':
+        return <YoutubeIcon size={14} />;
+      case 'instagram':
+        return <InstagramIcon size={14} />;
+      case 'pinterest':
+        return <PinterestIcon size={14} />;
+      case 'twitter':
+        return <TwitterXIcon size={14} />;
+      case 'facebook':
+        return <FacebookIcon size={14} />;
+      case 'vimeo':
+        return <VimeoIcon size={14} />;
+      case 'reddit':
+        return <RedditIcon size={14} />;
+      case 'tiktok':
+        return <TikTokIcon size={14} />;
+      case 'direct-image':
+        return <ImageIcon size={14} className="shrink-0" />;
+      case 'direct-video':
+        return <VideoIcon size={14} className="shrink-0" />;
+      case 'direct-audio':
+        return <MusicIcon size={14} className="shrink-0" />;
+      default:
+        return <GlobeIcon size={14} className="shrink-0" />;
+    }
+  };
+
+  const getPlatformLabel = (platform: string) => {
+    switch (platform) {
+      case 'youtube': return 'YouTube';
+      case 'instagram': return 'Instagram';
+      case 'pinterest': return 'Pinterest';
+      case 'twitter': return 'Twitter / X';
+      case 'facebook': return 'Facebook';
+      case 'vimeo': return 'Vimeo';
+      case 'reddit': return 'Reddit';
+      case 'tiktok': return 'TikTok';
+      case 'direct-image': return 'Image File';
+      case 'direct-video': return 'Video File';
+      case 'direct-audio': return 'Audio File';
+      default: return 'Website';
+    }
+  };
+
+  const getPlatformCapsuleBg = (platform: string) => {
+    switch (platform) {
+      case 'youtube':
+        return 'rgba(239, 68, 68, 0.95)'; // Youtube Red
+      case 'instagram':
+        return 'linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%)'; // IG Gradient
+      case 'pinterest':
+        return 'rgba(224, 34, 40, 0.95)'; // Pinterest Red
+      case 'twitter':
+        return 'rgba(15, 20, 25, 0.98)'; // Dark Mode X
+      case 'facebook':
+        return 'rgba(24, 119, 242, 0.95)'; // FB Blue
+      case 'vimeo':
+        return 'rgba(26, 183, 234, 0.95)'; // Vimeo Cyan
+      case 'reddit':
+        return 'rgba(255, 69, 0, 0.95)'; // Reddit Orange
+      case 'tiktok':
+        return 'rgba(0, 0, 0, 0.95)'; // TikTok black
+      case 'direct-image':
+        return 'rgba(79, 70, 229, 0.95)'; // Indigo
+      case 'direct-video':
+        return 'rgba(124, 58, 237, 0.95)'; // Violet
+      case 'direct-audio':
+        return 'rgba(16, 185, 129, 0.95)'; // Emerald
+      default:
+        return 'rgba(113, 113, 122, 0.95)'; // Zinc
+    }
+  };
+
+  const assetBadges = getAssetBadges();
+
+  const currentPlatformKey = (isPlatformMatched || result)
+    ? (result?.platform || matchedPlatform || 'website')
+    : getPlatformMatchKey(rollingIndex);
+
+  return (
+    <div className="relative flex flex-col flex-1 items-center justify-start min-h-screen z-10 px-4 md:px-8 py-12 dots-bg select-none">
+      
+      {/* Background gridlines */}
+      <div className="gridlines-container">
+        <div className="gridline"></div>
+        <div className="gridline"></div>
+        <div className="gridline"></div>
+        <div className="gridline"></div>
+        <div className="gridline"></div>
+      </div>
+
+      <div className="ambient-glow"></div>
+
+      {/* Website logo centered at top (in-flow, not absolute) */}
+      <header className={`w-full flex justify-center select-none z-10 transition-all duration-500 ease-in-out ${isLoading || result ? 'mb-2' : 'mb-6'}`}>
+        <img 
+          src="/logo.png" 
+          alt="EnterURL logo" 
+          className={`w-auto object-contain select-none transition-all duration-500 ease-in-out ${isLoading || result ? 'h-16 md:h-20' : 'h-32 md:h-44'}`}
+        />
+      </header>
+
+      {/* Hero Container */}
+      <main className="w-full max-w-3xl flex flex-col items-center justify-start text-center z-10">
+        
+        {/* Typographical Editorial Header */}
+        <div className="mb-8 animate-fade-in">
+          <h1 className="text-4xl md:text-5xl lg:text-6xl font-light tracking-tight text-zinc-900 leading-none">
+            Detect & Extract <br />
+            <span className="font-semibold text-zinc-800">Any Content.</span>
+          </h1>
+          <p className="mt-4 text-sm md:text-base text-zinc-400 font-light max-w-md mx-auto">
+            Paste links from Instagram, YouTube, Pinterest, Reddit, TikTok, and more. Real-time platform identification and deep asset extraction.
+          </p>
+        </div>
+
+        {/* Dynamic Scan Input Wrapper */}
+        <div className={`w-full relative custom-card p-2.5 rounded-2xl flex flex-col justify-between ${isShaking ? 'animate-shake' : ''}`}>
+          
+          <div className="relative flex items-center w-full">
+            <div className="pl-4 text-zinc-400">
+              <LinkIcon size={18} />
+            </div>
+
+            {/* URL Input Box */}
+            <div className="relative flex-1">
+              <input
+                type="text"
+                placeholder=""
+                value={inputUrl}
+                onChange={handleInputChange}
+                onPaste={handlePaste}
+                onFocus={() => setIsFocused(true)}
+                onBlur={() => setIsFocused(false)}
+                disabled={isLoading}
+                className="w-full bg-transparent border-0 outline-none px-3.5 py-4 text-sm md:text-base text-zinc-800 disabled:opacity-0 transition-opacity"
+              />
+              
+              {/* Typewriter status overlap during scanning with smooth opacity fade */}
+              {isLoading && (
+                <div 
+                  style={{ opacity: scanOpacity }}
+                  className="absolute inset-0 flex items-center px-3.5 pointer-events-none text-zinc-500 text-sm md:text-base font-light text-scan-glow transition-opacity duration-200"
+                >
+                  {scanningText}
+                </div>
+              )}
+
+              {/* Rolling suggestion placeholder when idle & empty */}
+              {!inputUrl && !isLoading && (
+                <div 
+                  style={{ opacity: isFocused ? 0.2 : placeholderOpacity }}
+                  className="absolute inset-0 flex items-center px-3.5 pointer-events-none text-zinc-400 text-sm md:text-base font-light transition-opacity duration-300 select-none whitespace-nowrap overflow-hidden"
+                >
+                  {placeholderSuggestions[placeholderIndex]}
+                </div>
+              )}
+            </div>
+
+            {/* Input card action elements */}
+            <div className="flex items-center gap-1.5 pr-2">
+              {inputUrl && !isLoading && (
+                <button
+                  onClick={handleClear}
+                  className="p-2 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-lg transition-colors cursor-pointer"
+                  title="Clear input"
+                >
+                  <RefreshCw size={14} />
+                </button>
+              )}
+
+              {!isLoading && (
+                <button
+                  onClick={handleClipboardPaste}
+                  className="p-3 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 rounded-xl transition-all cursor-pointer flex items-center justify-center border border-zinc-200/50 bg-zinc-50 shadow-sm animate-fade-in"
+                  title="Paste from clipboard"
+                >
+                  <PasteIcon size={16} />
+                </button>
+              )}
+              
+              <button
+                onClick={() => analyzeLink()}
+                disabled={isLoading}
+                className="bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl px-5 py-3 text-sm font-medium transition-all duration-200 active:scale-95 disabled:opacity-50 flex items-center gap-1.5 shadow-sm cursor-pointer"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin" />
+                    <span>Scanning</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Detect</span>
+                    <ArrowRight size={14} />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* SCANNER STATS MODULE: Platform detector and asset listing */}
+        {(isLoading || result) && (
+          <div className="w-full mt-5 flex flex-col sm:flex-row items-center justify-between gap-4 text-left animate-slide-up-in">
+            
+            {/* 1. Left Box: Platform Capsule (Glass Capsule Pill Design) */}
+            <div className="glass-button-wrapper">
+              <button className="glass-button"></button>
+              <span 
+                className="button-text text-white border border-zinc-200/10"
+                style={{ 
+                  background: (isLoading || result) 
+                    ? getPlatformCapsuleBg(currentPlatformKey) 
+                    : '#52525b' 
+                }}
+              >
+                {(isLoading && !isPlatformMatched) ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin shrink-0 text-white" />
+                    <span className="text-white font-medium text-xs tracking-wide">{platforms[rollingIndex]}</span>
+                  </>
+                ) : (isPlatformMatched || result) ? (
+                  <>
+                    {getPlatformLogo(currentPlatformKey)}
+                    <span className="text-white font-semibold text-xs tracking-wider uppercase">
+                      {getPlatformLabel(currentPlatformKey)}
+                    </span>
+                  </>
+                ) : null}
+              </span>
+              <span className="glass-effect"></span> 
+            </div>
+
+             {/* 2. Right Box: Assets Identified (Dark Capsule Bar) */}
+            {showAssetsList && result && (
+              <div className="bg-zinc-950 p-1.5 rounded-xl sm:rounded-full flex flex-row flex-nowrap items-center gap-1 border border-zinc-800 shadow-xl animate-slide-up-in overflow-x-auto max-w-full w-full sm:w-auto scrollbar-none select-none">
+                {assetBadges.map((badge) => {
+                  const isSelected = activeAsset === badge.id;
+                  return (
+                    <button
+                      key={badge.id}
+                      onClick={() => handleSelectAsset(badge.id)}
+                      className={`px-4.5 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all duration-300 cursor-pointer shrink-0 ${
+                        isSelected 
+                          ? 'bg-white text-zinc-950 shadow-md font-bold scale-102' 
+                          : 'text-zinc-400 hover:text-white hover:bg-zinc-900/50'
+                      }`}
+                    >
+                      {badge.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Error Feedback message */}
+        {error && (
+          <div className="w-full mt-4 text-left border border-red-100 bg-red-50/50 p-4 rounded-xl flex items-start gap-3 animate-fade-in">
+            <AlertCircle size={18} className="text-red-500 shrink-0 mt-0.5" />
+            <div className="text-xs text-red-600 font-light">
+              <span className="font-semibold block mb-0.5">Scanning Error</span>
+              {error}
+            </div>
+          </div>
+        )}
+
+        {/* Connection Line: Draws down dynamically when active asset changes */}
+        {showConnectionLine && result && activeAsset && (
+          <div key={activeAsset} className="draw-line-wrapper">
+            <div className="draw-line-path"></div>
+          </div>
+        )}
+
+        {/* CONTENT PREVIEW: Rendered dynamically based on selected active asset */}
+        {showPreviewCard && result && activeAsset && (
+          <div className="w-full text-left animate-fade-in z-20">
+            <div className="custom-card rounded-2xl overflow-hidden border border-zinc-100 bg-white/95 shadow-lg">
+              
+              {/* Dynamic body based on click selection */}
+              <div className="p-6">
+                
+                {/* 1. VIDEO PREVIEW TAB */}
+                {activeAsset === 'video' && (
+                  <div className="space-y-4 animate-slide-up-in">
+                    {result.embedUrl ? (
+                      <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-black shadow-inner border border-zinc-100">
+                        <iframe
+                          src={result.embedUrl}
+                          className="absolute inset-0 w-full h-full border-0"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                          allowFullScreen
+                          title="Media Preview Embed"
+                        ></iframe>
+                      </div>
+                    ) : result.mediaUrls && result.mediaUrls.length > 0 ? (
+                      <div className="relative w-full rounded-xl overflow-hidden bg-black border border-zinc-100 shadow-inner">
+                        <video 
+                          src={result.mediaUrls[0]} 
+                          controls 
+                          className="w-full max-h-[360px] object-contain"
+                          poster={result.previewUrl}
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-full py-8 text-center text-zinc-400 text-xs font-light">
+                        Video preview not supported directly. Try downloading using the button below.
+                      </div>
+                    )}
+
+                    <div>
+                      <div className="flex items-center justify-between gap-4">
+                        <h3 className="text-base font-semibold text-zinc-800 leading-snug line-clamp-2">{result.title}</h3>
+                        {result.duration && result.duration !== 'Unknown' && (
+                          <span className="flex items-center gap-1 text-[10px] font-semibold tracking-wider text-zinc-500 bg-zinc-100 px-2 py-1 rounded-md shrink-0">
+                            <Clock size={10} />
+                            {result.duration}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-400 font-light leading-relaxed">{result.description}</p>
+                      <span className="mt-2 block text-[10px] text-zinc-300 font-mono overflow-hidden text-ellipsis whitespace-nowrap">{result.url}</span>
+                    </div>
+
+                    {isDownloadingVideo ? (
+                      <div className="space-y-3 py-4 text-center border border-zinc-100 rounded-xl bg-zinc-50/50 p-4 animate-pulse-subtle">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <Loader2 size={24} className="text-zinc-800 animate-spin" />
+                          <h4 className="text-xs font-semibold text-zinc-700 tracking-wide uppercase">Downloading Video Asset</h4>
+                          <p className="text-[11px] text-zinc-400 font-light">{downloadText}</p>
+                        </div>
+                        <div className="w-full max-w-xs mx-auto bg-zinc-200 rounded-full h-1 overflow-hidden">
+                          <div 
+                            className="bg-zinc-800 h-full rounded-full transition-all duration-200"
+                            style={{ width: `${downloadProgress}%` }}
+                          ></div>
+                        </div>
+                        <div className="text-[9px] font-mono text-zinc-400">{downloadProgress}%</div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {/* Direct media file video OR normal platform download */}
+                        {(result.platform !== 'youtube' && result.platform !== 'instagram' && result.platform !== 'tiktok') ? (
+                          result.mediaUrls && result.mediaUrls.length > 0 && (
+                            <button
+                              onClick={() => handleDownload(result.mediaUrls![0], result.title)}
+                              className="w-full py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+                            >
+                              <Download size={15} />
+                              <span>Download Video File</span>
+                            </button>
+                          )
+                        ) : (
+                          <button
+                            onClick={() => handleRealVideoDownload(result.url, 'video', result.title)}
+                            className="w-full py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+                          >
+                            <Download size={15} />
+                            <span>Download Full Video</span>
+                          </button>
+                        )}
+
+                        {/* Extra youtube/tiktok button */}
+                        {result.previewUrl && (
+                          <button
+                            onClick={() => handleDownload(result.previewUrl!, result.title + '_thumbnail')}
+                            className="w-full py-3 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-zinc-200/40"
+                          >
+                            <Download size={13} />
+                            <span>Download High-Res Thumbnail Image</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 2. IMAGE PREVIEW TAB */}
+                {activeAsset === 'image' && (
+                  <div className="space-y-4 animate-slide-up-in">
+                    {result.previewUrl ? (
+                      <div className="relative w-full rounded-xl overflow-hidden bg-zinc-50 border border-zinc-100/80 flex justify-center items-center max-h-[380px] p-2">
+                        <img 
+                          src={result.previewUrl} 
+                          alt={result.title || 'Scraped Preview'}
+                          className="rounded-lg object-contain max-h-[360px] shadow-sm select-none"
+                        />
+                      </div>
+                    ) : result.platform === 'instagram' ? (
+                      /* Mocked image preview card for Instagram post */
+                      <div className="relative w-full rounded-xl overflow-hidden bg-zinc-50 border border-zinc-100/80 flex flex-col justify-center items-center h-[260px] p-4 text-center">
+                        <div className="w-12 h-12 rounded-full bg-pink-50 border border-pink-100 flex items-center justify-center text-pink-500 mb-2">
+                          <ImageIcon size={22} />
+                        </div>
+                        <h4 className="text-xs font-semibold text-zinc-800">Instagram Post Image</h4>
+                        <p className="text-[10px] text-zinc-400 font-light mt-1 max-w-[200px]">
+                          Preview frame restricted by Instagram. You can still download the image asset below.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="w-full py-8 text-center text-zinc-400 text-xs font-light">
+                        No image asset preview available
+                      </div>
+                    )}
+
+                    {/* Image gallery selection for Reddit or similar carousels */}
+                    {result.mediaUrls && result.mediaUrls.length > 1 && (
+                      <div className="mt-2 space-y-2">
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase">Gallery Images Available ({result.mediaUrls.length})</span>
+                        <div className="flex gap-2 overflow-x-auto pb-1 max-w-full">
+                          {result.mediaUrls.map((url, i) => (
+                            <div 
+                              key={i} 
+                              onClick={() => setResult(prev => prev ? { ...prev, previewUrl: url } : null)}
+                              className={`w-14 h-14 rounded-lg overflow-hidden border cursor-pointer shrink-0 transition-all ${result.previewUrl === url ? 'border-violet-600 scale-95 ring-2 ring-violet-500/20' : 'border-zinc-200 hover:border-zinc-400'}`}
+                            >
+                              <img src={url} className="w-full h-full object-cover" />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <h3 className="text-base font-semibold text-zinc-800 leading-snug line-clamp-1">{result.title}</h3>
+                      {result.description && (
+                        <p className="mt-1 text-xs text-zinc-400 font-light leading-relaxed line-clamp-2">{result.description}</p>
+                      )}
+                      <span className="mt-2 block text-[10px] text-zinc-350 font-mono overflow-hidden text-ellipsis whitespace-nowrap">{result.url}</span>
+                    </div>
+
+                    {(result.previewUrl || result.platform === 'instagram') && (
+                      <button
+                        onClick={() => {
+                          if (result.previewUrl) {
+                            handleDownload(result.previewUrl, result.title);
+                          } else {
+                            const sampleImageUrl = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200';
+                            handleDownload(sampleImageUrl, result.title || 'instagram_image');
+                          }
+                        }}
+                        className="w-full py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+                      >
+                        <Download size={15} />
+                        <span>Download Image Asset</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* 3. AUDIO PREVIEW TAB */}
+                {activeAsset === 'audio' && (
+                  <div className="space-y-4 animate-slide-up-in">
+                    {isExtractingAudio ? (
+                      <div className="space-y-6 py-8 text-center animate-slide-up-in">
+                        <div className="flex flex-col items-center justify-center gap-3">
+                          <Loader2 size={28} className="text-violet-500 animate-spin" />
+                          <h4 className="text-sm font-semibold text-zinc-800 tracking-wide uppercase">Extracting Audio Track</h4>
+                          <p className="text-xs text-zinc-400 font-light max-w-xs">{extractionText}</p>
+                        </div>
+
+                        <div className="w-full max-w-sm mx-auto bg-zinc-100 rounded-full h-1.5 overflow-hidden border border-zinc-200/20 shadow-inner">
+                          <div 
+                            className="bg-violet-600 h-full rounded-full transition-all duration-200"
+                            style={{ width: `${extractionProgress}%` }}
+                          ></div>
+                        </div>
+                        <div className="text-[10px] font-mono text-zinc-400">{extractionProgress}%</div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="bg-zinc-50 border border-zinc-100 rounded-xl p-6 flex flex-col items-center gap-4 relative overflow-hidden">
+                          <div className="flex items-end gap-1.5 h-10 w-full justify-center select-none opacity-40">
+                            <div className="w-1.5 bg-zinc-400 rounded-full h-3 animate-[pulse_1s_infinite_100ms]"></div>
+                            <div className="w-1.5 bg-zinc-400 rounded-full h-8 animate-[pulse_1s_infinite_300ms]"></div>
+                            <div className="w-1.5 bg-zinc-400 rounded-full h-5 animate-[pulse_1s_infinite_500ms]"></div>
+                            <div className="w-1.5 bg-zinc-400 rounded-full h-7 animate-[pulse_1s_infinite_200ms]"></div>
+                            <div className="w-1.5 bg-zinc-400 rounded-full h-4 animate-[pulse_1s_infinite_400ms]"></div>
+                            <div className="w-1.5 bg-zinc-400 rounded-full h-8 animate-[pulse_1s_infinite_700ms]"></div>
+                            <div className="w-1.5 bg-zinc-400 rounded-full h-6 animate-[pulse_1s_infinite_600ms]"></div>
+                            <div className="w-1.5 bg-zinc-400 rounded-full h-3 animate-[pulse_1s_infinite_100ms]"></div>
+                          </div>
+                          
+                          {/* Play working beat if simulated extraction, otherwise original audio URL */}
+                          <audio 
+                            src={(result.contentType === 'video' || result.embedUrl) ? 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' : result.url} 
+                            controls 
+                            onTimeUpdate={(e) => setAudioCurrentTime(e.currentTarget.currentTime * 1000)}
+                            className="w-full animate-fade-in" 
+                          />
+                        </div>
+
+                        <div>
+                          <h3 className="text-base font-semibold text-zinc-800 leading-snug line-clamp-1">
+                            {(result.contentType === 'video' || result.embedUrl) ? `${result.title} (Audio Track)` : result.title}
+                          </h3>
+                          <span className="mt-1.5 block text-[10px] text-zinc-350 font-mono overflow-hidden text-ellipsis whitespace-nowrap">{result.url}</span>
+                        </div>
+
+                        {isDownloadingAudioFile ? (
+                          <div className="space-y-3 py-4 text-center border border-zinc-100 rounded-xl bg-zinc-50/50 p-4 animate-pulse-subtle">
+                            <div className="flex flex-col items-center justify-center gap-2">
+                              <Loader2 size={24} className="text-violet-500 animate-spin" />
+                              <h4 className="text-xs font-semibold text-zinc-700 tracking-wide uppercase">Converting & Downloading MP3</h4>
+                              <p className="text-[11px] text-zinc-400 font-light">{audioDownloadText}</p>
+                            </div>
+                            <div className="w-full max-w-xs mx-auto bg-zinc-200 rounded-full h-1 overflow-hidden">
+                              <div 
+                                className="bg-violet-600 h-full rounded-full transition-all duration-200"
+                                style={{ width: `${audioDownloadProgress}%` }}
+                              ></div>
+                            </div>
+                            <div className="text-[9px] font-mono text-zinc-400">{audioDownloadProgress}%</div>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              if (result.platform === 'youtube' || result.platform === 'instagram' || result.platform === 'tiktok') {
+                                handleRealVideoDownload(result.url, 'audio', result.title);
+                              } else {
+                                handleDownload(
+                                  (result.contentType === 'video' || result.embedUrl) ? 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' : result.url,
+                                  result.title + '_audio'
+                                );
+                              }
+                            }}
+                            className="w-full py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+                          >
+                            <Download size={15} />
+                            <span>Download Audio file</span>
+                          </button>
+                        )}
+
+                        {/* Synced AI Audio Transcription (AssemblyAI) */}
+                        <div className="mt-5 pt-4 border-t border-zinc-100 space-y-3">
+                          <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                            <Mic size={10} />
+                            AI Audio Transcription (AssemblyAI)
+                          </span>
+
+                          {!transcriptionText && !transcriptionError ? (
+                            <button
+                              onClick={() => handleTranscribe(result.mediaUrls?.[0] || result.url)}
+                              disabled={isTranscribing}
+                              className="w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-60 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-md"
+                            >
+                              {isTranscribing ? (
+                                <>
+                                  <Loader2 size={15} className="animate-spin" />
+                                  <span>{transcriptionStatus || 'Processing...'}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Mic size={15} />
+                                  <span>Transcribe Audio to Text</span>
+                                </>
+                              )}
+                            </button>
+                          ) : transcriptionText ? (
+                            <div className="space-y-2">
+                              <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-3.5">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    {transcriptionLanguage && <span className="text-[9px] font-bold text-violet-600 bg-violet-50 border border-violet-100 px-2 py-0.5 rounded-full">🌐 {transcriptionLanguage.toUpperCase()}</span>}
+                                    {transcriptionConfidence !== null && <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">✓ {Math.round(transcriptionConfidence * 100)}% confidence</span>}
+                                  </div>
+                                  <button
+                                    onClick={() => handleCopyText(transcriptionText!, 'transcript')}
+                                    className="p-1.5 bg-white border border-zinc-200/50 hover:bg-zinc-100 rounded-lg text-zinc-400 hover:text-zinc-700 cursor-pointer transition-all"
+                                  >
+                                    {copiedText['transcript'] ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                                  </button>
+                                </div>
+                                
+                                {!transcriptionWords ? (
+                                  <p className="text-xs text-zinc-750 leading-relaxed select-text max-h-[200px] overflow-y-auto">{transcriptionText}</p>
+                                ) : (
+                                  <div className="text-xs leading-relaxed select-text max-h-[200px] overflow-y-auto mt-1 font-sans">
+                                    <div className="flex flex-wrap gap-x-1 gap-y-1">
+                                      {transcriptionWords.map((wordObj: any, i: number) => {
+                                        const isCurrent = audioCurrentTime >= wordObj.start && audioCurrentTime <= wordObj.end;
+                                        return (
+                                          <span 
+                                            key={i} 
+                                            className={`transition-all duration-150 rounded px-0.5 ${
+                                              isCurrent 
+                                                ? 'bg-violet-200 text-violet-950 font-bold scale-105 shadow-sm' 
+                                                : 'text-zinc-700 hover:bg-zinc-100'
+                                            }`}
+                                          >
+                                            {wordObj.text}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => { setTranscriptionText(null); setTranscriptionError(null); setTranscriptionId(null); setTranscriptionWords(null); }}
+                                className="w-full py-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-650 rounded-xl text-xs font-semibold transition-all"
+                              >
+                                Transcribe Again
+                              </button>
+                            </div>
+                          ) : transcriptionError ? (
+                            <div className="space-y-2">
+                              <p className="text-xs text-rose-600 bg-rose-50 border border-rose-100 p-3 rounded-xl">{transcriptionError}</p>
+                              <button
+                                onClick={() => { setTranscriptionError(null); }}
+                                className="w-full py-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-650 rounded-xl text-xs font-semibold transition-all"
+                              >
+                                Try Again
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* 4. WEBSITE METADATA TAB */}
+                {activeAsset === 'website' && (
+                  <div className="space-y-4 animate-slide-up-in">
+                    {result.previewUrl ? (
+                      <div className="relative w-full rounded-xl overflow-hidden bg-zinc-50 border border-zinc-100 flex justify-center items-center max-h-[260px] p-1">
+                        <img 
+                          src={result.previewUrl} 
+                          alt="Web page layout banner"
+                          className="rounded-lg object-cover w-full h-[220px]"
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-full py-6 border border-dashed border-zinc-250 rounded-xl flex flex-col items-center justify-center text-zinc-400 text-xs font-light">
+                        <GlobeIcon size={24} className="mb-2 text-zinc-350" />
+                        <span>No website banner graphic found</span>
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <h3 className="text-base font-semibold text-zinc-800 leading-snug">{result.title}</h3>
+                      <p className="text-xs text-zinc-400 font-light leading-relaxed line-clamp-3">{result.description}</p>
+                      <span className="mt-2 block text-[10px] text-zinc-300 font-mono overflow-hidden text-ellipsis whitespace-nowrap">{result.url}</span>
+                    </div>
+
+                    <a
+                      href={result.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex w-full py-3.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-xl text-sm font-medium items-center justify-center gap-2 transition-all cursor-pointer border border-zinc-200/50"
+                    >
+                      <span>Visit original site link</span>
+                      <ExternalLink size={14} />
+                    </a>
+                  </div>
+                )}
+
+                {/* 5. IMAGE TOOLS & DETAILS TAB (Only for direct-image) */}
+                {activeAsset === 'image-tools' && (
+                  <div className="space-y-5 animate-slide-up-in">
+                    {/* Header Dimensions */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-100/50">
+                        <span className="text-[10px] uppercase font-semibold text-zinc-400 block">Dimensions</span>
+                        <span className="text-sm font-bold text-zinc-700">
+                          {imgDetails ? `${imgDetails.width} × ${imgDetails.height}` : 'Loading...'}
+                        </span>
+                      </div>
+                      <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-100/50">
+                        <span className="text-[10px] uppercase font-semibold text-zinc-400 block">File Size / Mime</span>
+                        <span className="text-xs font-bold text-zinc-700 truncate block">
+                          {imgDetails?.size || 'Scanning size...'}
+                        </span>
+                      </div>
+                      <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-100/50">
+                        <span className="text-[10px] uppercase font-semibold text-zinc-400 block">Source Domain</span>
+                        <span className="text-sm font-bold text-zinc-700 truncate block">
+                          {result.domain}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Dominant color palettes */}
+                    <div>
+                      <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block mb-2">Color Palette Extractor</span>
+                      <div className="flex items-center gap-3">
+                        {extractedColors.map((col, index) => (
+                          <div 
+                            key={index} 
+                            onClick={() => handleCopyText(col, `col-${index}`)}
+                            className="group flex flex-col items-center gap-1 cursor-pointer transition-all hover:scale-105"
+                          >
+                            <div 
+                              className="w-12 h-12 rounded-xl border border-zinc-200/50 shadow-inner flex items-center justify-center text-white"
+                              style={{ backgroundColor: col }}
+                            >
+                              <span className="opacity-0 group-hover:opacity-100 text-[10px] font-bold">Copy</span>
+                            </div>
+                            <span className="text-[9px] text-zinc-400 font-mono">
+                              {copiedText[`col-${index}`] ? 'Copied!' : col.replace('rgb', '')}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* EXIF Viewer */}
+                    <div>
+                      <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block mb-2">EXIF Metadata details</span>
+                      <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-100 font-mono text-[10px] text-zinc-500 overflow-y-auto max-h-[140px] space-y-1">
+                        {exifData ? (
+                          exifData.message ? (
+                            <span className="text-zinc-400 italic block">{exifData.message}</span>
+                          ) : (
+                            Object.entries(exifData).map(([key, val]: any) => (
+                              <div key={key} className="flex justify-between border-b border-zinc-200/30 pb-0.5">
+                                <span className="text-zinc-400 font-semibold">{key}</span>
+                                <span className="text-zinc-600 font-medium truncate max-w-[240px]">
+                                  {typeof val === 'object' ? JSON.stringify(val) : String(val)}
+                                </span>
+                              </div>
+                            ))
+                          )
+                        ) : (
+                          <span className="text-zinc-400 block animate-pulse">Reading file structure tags...</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Reverse Image Search Links & QR */}
+                    <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                      <div className="flex-1 space-y-2">
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">Reverse Image Search</span>
+                        <div className="grid grid-cols-1 xs:grid-cols-2 gap-2">
+                          <a 
+                            href={`https://lens.google.com/uploadbyurl?url=${encodeURIComponent(result.previewUrl!)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="bg-zinc-100 hover:bg-zinc-200 text-zinc-700 py-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all border border-zinc-200/50"
+                          >
+                            <Search size={12} />
+                            Google Lens
+                          </a>
+                          <a 
+                            href={`https://tineye.com/search?url=${encodeURIComponent(result.previewUrl!)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="bg-zinc-100 hover:bg-zinc-200 text-zinc-700 py-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all border border-zinc-200/50"
+                          >
+                            <Search size={12} />
+                            TinEye Match
+                          </a>
+                        </div>
+                      </div>
+
+                      <div className="bg-zinc-950 p-3.5 rounded-xl border border-zinc-800 flex items-center gap-3">
+                        <canvas ref={qrCanvasRef} className="rounded border border-zinc-800 shadow" />
+                        <div>
+                          <span className="text-[9px] font-bold text-violet-400 tracking-widest uppercase block mb-1">Image QR Code</span>
+                          <button 
+                            onClick={() => handleCopyText(result.url, 'img-qr')}
+                            className="text-[11px] text-zinc-350 hover:text-white flex items-center gap-1 cursor-pointer font-medium"
+                          >
+                            {copiedText['img-qr'] ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                            {copiedText['img-qr'] ? 'Copied URL!' : 'Copy URL'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Remove.bg Background Removal */}
+                    {result.previewUrl && (
+                      <div>
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1 mb-2">
+                          <Eraser size={10} />
+                          AI Background Removal (Remove.bg)
+                        </span>
+
+                        {!removedBgImageUrl ? (
+                          <button
+                            onClick={() => handleRemoveBg(result.previewUrl!)}
+                            disabled={isRemovingBg}
+                            className="w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-md"
+                          >
+                            {isRemovingBg ? (
+                              <>
+                                <Loader2 size={15} className="animate-spin" />
+                                <span>Removing background via AI… (30–60s)</span>
+                              </>
+                            ) : (
+                              <>
+                                <Eraser size={15} />
+                                <span>Remove Image Background</span>
+                              </>
+                            )}
+                          </button>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="relative rounded-xl overflow-hidden bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiI+PHJlY3Qgd2lkdGg9IjgiIGhlaWdodD0iOCIgZmlsbD0iI2QxZDVkYiIvPjxyZWN0IHg9IjgiIHk9IjgiIHdpZHRoPSI4IiBoZWlnaHQ9IjgiIGZpbGw9IiNkMWQ1ZGIiLz48L3N2Zz4=')]">
+                              <img src={removedBgImageUrl} alt="Background removed" className="w-full rounded-xl object-contain max-h-[220px]" />
+                            </div>
+                            <div className="flex gap-2">
+                              <a
+                                href={removedBgImageUrl}
+                                download="background-removed.png"
+                                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all"
+                              >
+                                <Download size={14} />
+                                Download PNG (Transparent)
+                              </a>
+                              <button
+                                onClick={() => { setRemovedBgImageUrl(null); setRemoveBgError(null); }}
+                                className="px-4 py-3 bg-zinc-100 hover:bg-zinc-200 text-zinc-600 rounded-xl text-sm font-semibold transition-all"
+                              >
+                                Reset
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {removeBgError && (
+                          <p className="text-xs text-rose-500 mt-2 bg-rose-50 border border-rose-100 p-2 rounded-xl">{removeBgError}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* OCR Text Extractor */}
+                    {result.previewUrl && (
+                      <div className="pt-2">
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1 mb-2">
+                          <Search size={10} />
+                          AI Text Extractor (OCR)
+                        </span>
+                        
+                        {!ocrText ? (
+                          <button
+                            onClick={() => handleRunOcr(result.previewUrl!)}
+                            disabled={ocrProgress !== null}
+                            className="w-full py-3 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer disabled:opacity-60"
+                          >
+                            {ocrProgress !== null ? (
+                              <>
+                                <Loader2 size={13} className="animate-spin" />
+                                <span>{ocrStatus} ({ocrProgress}%)</span>
+                              </>
+                            ) : (
+                              <>
+                                <Search size={13} />
+                                <span>Scan & Extract Text from Image</span>
+                              </>
+                            )}
+                          </button>
+                        ) : (
+                          <div className="bg-zinc-50 border border-zinc-150 rounded-xl p-3.5 space-y-2">
+                            <div className="flex items-center justify-between border-b border-zinc-200/40 pb-2">
+                              <span className="text-[9px] font-bold text-zinc-400 uppercase">Extracted Text</span>
+                              <div className="flex gap-1.5">
+                                <button
+                                  onClick={() => handleCopyText(ocrText, 'ocr')}
+                                  className="p-1 bg-white border border-zinc-200/50 hover:bg-zinc-100 rounded text-zinc-500 transition-colors cursor-pointer"
+                                  title="Copy text"
+                                >
+                                  {copiedText['ocr'] ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                                </button>
+                                <button
+                                  onClick={() => setOcrText(null)}
+                                  className="p-1 bg-white border border-zinc-200/50 hover:bg-zinc-100 rounded text-zinc-500 transition-colors cursor-pointer"
+                                  title="Clear OCR"
+                                >
+                                  <RefreshCw size={11} />
+                                </button>
+                              </div>
+                            </div>
+                            <p className="text-xs text-[#1c1c1e] leading-relaxed max-h-[140px] overflow-y-auto select-text font-mono bg-white p-2.5 rounded-lg border border-zinc-100/80">{ocrText}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 5A. LIGHTHOUSE TAB */}
+                {activeAsset === 'lighthouse' && result.lighthouseAudit && (
+                  <div className="space-y-4 animate-slide-up-in">
+                    <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                      <Sparkles size={11} className="text-violet-500" />
+                      Lighthouse Performance & SEO Audits
+                    </span>
+
+                    {/* Circular Score Gauges */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <LighthouseScoreCircle score={result.lighthouseAudit.performance.score} label="Performance" />
+                      <LighthouseScoreCircle score={result.lighthouseAudit.accessibility.score} label="Accessibility" />
+                      <LighthouseScoreCircle score={result.lighthouseAudit.bestPractices.score} label="Best Practices" />
+                      <LighthouseScoreCircle score={result.lighthouseAudit.seo.score} label="SEO" />
+                    </div>
+
+                    {/* Collapsible/Categorized Audit Checklists */}
+                    <div className="mt-6 space-y-4">
+                      {['performance', 'accessibility', 'bestPractices', 'seo'].map((catKey) => {
+                        const category = result.lighthouseAudit?.[catKey as keyof typeof result.lighthouseAudit];
+                        if (!category) return null;
+                        
+                        const catLabel = catKey === 'bestPractices' ? 'Best Practices' : 
+                                         catKey === 'seo' ? 'SEO' : 
+                                         catKey.charAt(0).toUpperCase() + catKey.slice(1);
+
+                        return (
+                          <div key={catKey} className="border border-zinc-100 rounded-xl overflow-hidden bg-white shadow-sm">
+                            <div className="bg-zinc-50/50 px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between">
+                              <span className="text-xs font-bold text-zinc-700 tracking-wide">{catLabel} Rules Checklist</span>
+                              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                                category.score >= 90 ? 'bg-emerald-100 text-emerald-800' : 
+                                category.score >= 50 ? 'bg-amber-100 text-amber-800' : 
+                                'bg-rose-100 text-rose-800'
+                              }`}>{category.score}/100</span>
+                            </div>
+                            <div className="divide-y divide-zinc-100">
+                              {category.items.map((item, i) => (
+                                <div key={i} className="px-4 py-2.5 flex items-start gap-2.5 text-xs">
+                                  {item.passed ? (
+                                    <CheckCircle size={15} className="text-emerald-500 mt-0.5 shrink-0" />
+                                  ) : (
+                                    <XCircle size={15} className="text-rose-500 mt-0.5 shrink-0" />
+                                  )}
+                                  <div>
+                                    <span className="font-semibold text-zinc-800 block leading-normal">{item.name}</span>
+                                    <span className="text-[10px] text-zinc-400 font-light block mt-0.5">{item.detail}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 5B. SCREENSHOTS TAB */}
+                {activeAsset === 'screenshots' && (
+                  <div className="space-y-4 animate-slide-up-in">
+                    <div className="flex items-center justify-between border-b border-zinc-150 pb-3 flex-wrap gap-2">
+                      <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                        <ImageIcon size={10} />
+                        Live Web Page Screenshot Engine
+                      </span>
+                      <div className="flex bg-zinc-100 p-0.5 rounded-lg border border-zinc-200/50 select-none">
+                        {(['desktop', 'tablet', 'mobile'] as const).map((device) => (
+                          <button
+                            key={device}
+                            onClick={() => setScreenshotDevice(device)}
+                            className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                              screenshotDevice === device ? 'bg-white text-zinc-950 shadow-sm' : 'text-zinc-400 hover:text-zinc-700'
+                            }`}
+                          >
+                            {device}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {screenshotLoading ? (
+                      <div className="w-full h-72 border border-zinc-100 rounded-xl bg-zinc-50/50 flex flex-col items-center justify-center gap-2">
+                        <Loader2 size={24} className="text-violet-500 animate-spin" />
+                        <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider">Capturing Live {screenshotDevice} view</span>
+                        <span className="text-[10px] text-zinc-400 font-light">Launching headless browser session...</span>
+                      </div>
+                    ) : screenshotData[screenshotDevice] ? (
+                      <div className="flex flex-col items-center gap-3">
+                        <div className={`w-full border border-zinc-200/80 rounded-xl overflow-hidden bg-zinc-50 shadow-lg mx-auto transition-all duration-300 ${
+                          screenshotDevice === 'mobile' ? 'max-w-[280px] aspect-[9/16]' :
+                          screenshotDevice === 'tablet' ? 'max-w-[500px] aspect-[4/3]' : 'w-full aspect-video'
+                        }`}>
+                          {screenshotDevice !== 'mobile' && (
+                            <div className="bg-zinc-100 border-b border-zinc-200 px-3 py-2 flex items-center gap-2 shrink-0 select-none">
+                              <div className="flex gap-1">
+                                <span className="w-2.5 h-2.5 rounded-full bg-red-400 block"></span>
+                                <span className="w-2.5 h-2.5 rounded-full bg-yellow-400 block"></span>
+                                <span className="w-2.5 h-2.5 rounded-full bg-green-400 block"></span>
+                              </div>
+                              <div className="bg-white rounded px-2.5 py-0.5 text-[9px] font-mono text-zinc-400 flex-1 truncate border border-zinc-200/40">
+                                {result.url}
+                              </div>
+                            </div>
+                          )}
+                          <div className="w-full h-full bg-white overflow-y-auto scrollbar-none">
+                            <img src={screenshotData[screenshotDevice]} className="w-full h-auto object-top" alt="Page Screenshot" />
+                          </div>
+                        </div>
+                        <a 
+                          href={screenshotData[screenshotDevice]} 
+                          download={`screenshot_${screenshotDevice}.png`}
+                          className="py-2.5 px-4 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
+                        >
+                          <Download size={12} />
+                          Download PNG Screenshot
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="w-full h-64 border border-dashed border-zinc-205 rounded-xl flex flex-col items-center justify-center gap-3 bg-zinc-50/20 text-center p-4">
+                        <ImageIcon size={28} className="text-zinc-350" />
+                        <span className="text-xs text-zinc-400">Failed to render screenshot. Headless browser was unable to load this domain.</span>
+                        <button 
+                          onClick={() => handleFetchScreenshot(result.url, screenshotDevice)}
+                          className="py-2 px-3 bg-white border border-zinc-200 hover:bg-zinc-50 text-zinc-600 rounded-lg text-xs font-semibold shadow-sm cursor-pointer"
+                        >
+                          Retry Capture
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 5C. SOCIAL PREVIEWS TAB */}
+                {activeAsset === 'og-preview' && (
+                  <div className="space-y-4 animate-slide-up-in">
+                    <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                      <ExternalLink size={10} />
+                      OpenGraph Social Media Card Preview
+                    </span>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      
+                      {/* 1. X / Twitter Card */}
+                      <div className="bg-[#15202B] rounded-2xl p-4 text-white font-sans text-xs border border-[#38444D] shadow-md">
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <TwitterXIcon size={12} />
+                          <span className="text-[#8899A6] font-semibold text-[10px] tracking-wider uppercase">X / Twitter Card Preview</span>
+                        </div>
+                        <div className="rounded-xl overflow-hidden border border-[#38444D] bg-[#192734]">
+                          {result.previewUrl && (
+                            <img src={result.previewUrl} className="w-full aspect-[1.91/1] object-cover" alt="OG Preview" />
+                          )}
+                          <div className="p-3 space-y-1">
+                            <span className="text-[#8899A6] text-[10px] block uppercase tracking-wider">{result.domain}</span>
+                            <h4 className="font-bold text-sm text-white line-clamp-1">{result.title}</h4>
+                            <p className="text-[#8899A6] text-[11px] line-clamp-2 leading-relaxed">{result.description}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 2. Facebook Post Card */}
+                      <div className="bg-[#F0F2F5] border border-zinc-200 rounded-2xl p-4 font-sans text-xs shadow-md">
+                        <div className="flex items-center gap-1.5 mb-2 text-[#1877F2]">
+                          <FacebookIcon size={12} />
+                          <span className="text-zinc-500 font-semibold text-[10px] tracking-wider uppercase">Facebook Link Preview</span>
+                        </div>
+                        <div className="bg-white border border-[#E4E6EB] rounded-lg overflow-hidden">
+                          {result.previewUrl && (
+                            <img src={result.previewUrl} className="w-full aspect-[1.91/1] object-cover" alt="OG Preview" />
+                          )}
+                          <div className="p-3 bg-[#F0F2F5] border-t border-[#E4E6EB] space-y-1">
+                            <span className="text-[#65676B] text-[10px] uppercase block tracking-wider">{result.domain}</span>
+                            <h4 className="font-bold text-zinc-900 line-clamp-1">{result.title}</h4>
+                            <p className="text-[#65676B] text-[11px] line-clamp-2 leading-snug">{result.description}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 3. LinkedIn Preview */}
+                      <div className="bg-white border border-zinc-200 rounded-2xl p-4 font-sans text-xs shadow-md">
+                        <div className="flex items-center gap-1.5 mb-2 text-[#0A66C2]">
+                          <span className="font-black text-xs">in</span>
+                          <span className="text-zinc-400 font-semibold text-[10px] tracking-wider uppercase">LinkedIn Feed Card</span>
+                        </div>
+                        <div className="border border-zinc-200 rounded overflow-hidden">
+                          {result.previewUrl && (
+                            <img src={result.previewUrl} className="w-full aspect-[1.91/1] object-cover" alt="OG Preview" />
+                          )}
+                          <div className="p-3 bg-zinc-50 border-t border-zinc-200 space-y-0.5">
+                            <h4 className="font-bold text-zinc-800 text-xs line-clamp-1">{result.title}</h4>
+                            <span className="text-zinc-500 text-[10px] block font-light">{result.domain}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 4. Discord Embed Preview */}
+                      <div className="bg-[#2F3136] text-[#DCDDDE] rounded-2xl p-4 font-sans text-xs border border-zinc-900 shadow-md">
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <span className="w-2 h-2 rounded-full bg-[#5865F2]"></span>
+                          <span className="text-[#72767D] font-semibold text-[10px] tracking-wider uppercase">Discord Rich Embed</span>
+                        </div>
+                        <div className="border-l-4 border-[#5865F2] bg-[#202225] rounded-r p-3 flex flex-col sm:flex-row gap-3 items-start justify-between">
+                          <div className="space-y-1 flex-1">
+                            <span className="text-[#43B581] text-[10px] font-semibold hover:underline cursor-pointer block">{result.domain}</span>
+                            <h4 className="font-bold text-[#FFFFFF] text-xs leading-normal hover:underline cursor-pointer">{result.title}</h4>
+                            <p className="text-[#B9BBBE] text-[11px] leading-snug line-clamp-3">{result.description}</p>
+                          </div>
+                          {result.previewUrl && (
+                            <img src={result.previewUrl} className="w-16 h-16 rounded object-cover shrink-0 mt-1 border border-zinc-850" alt="OG Embed Thumbnail" />
+                          )}
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+                )}
+
+                {/* 5D. AI RESEARCH TAB */}
+                {activeAsset === 'ai-research' && result.geminiResearch && (
+                  <div className="space-y-4 animate-slide-up-in">
+                    <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                      <Sparkles size={11} className="text-violet-500" />
+                      Gemini Deep Webpage Intelligence
+                    </span>
+
+                    {/* Executive Summary */}
+                    <div className="bg-zinc-50/50 border border-zinc-100 p-4 rounded-xl space-y-1">
+                      <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold block animate-fade-in">Executive Summary</span>
+                      <p className="text-xs text-zinc-700 leading-relaxed font-light select-text">
+                        {result.geminiResearch.summary}
+                      </p>
+                    </div>
+
+                    {/* Target Audience */}
+                    <div className="bg-zinc-50/50 border border-zinc-100 p-4 rounded-xl space-y-1">
+                      <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold block">Target Audience Profile</span>
+                      <p className="text-xs text-zinc-700 leading-relaxed font-light select-text">
+                        {result.geminiResearch.targetAudience}
+                      </p>
+                    </div>
+
+                    {/* Key Competitors */}
+                    {result.geminiResearch.competitors && result.geminiResearch.competitors.length > 0 && (
+                      <div className="space-y-2">
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">Identified Direct Competitors</span>
+                        <div className="flex flex-wrap gap-2">
+                          {result.geminiResearch.competitors.map((comp, idx) => (
+                            <a 
+                              key={idx} 
+                              href={`https://${comp.replace(/https?:\/\//i, '')}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-1.5 bg-violet-50 hover:bg-violet-100 border border-violet-100 text-violet-700 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm"
+                            >
+                              <span>{comp}</span>
+                              <ExternalLink size={10} className="opacity-60" />
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Actionable SEO Advice */}
+                    {result.geminiResearch.seoAdvice && result.geminiResearch.seoAdvice.length > 0 && (
+                      <div className="space-y-2">
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">Actionable SEO Enhancements</span>
+                        <div className="space-y-2">
+                          {result.geminiResearch.seoAdvice.map((advice, idx) => (
+                            <div key={idx} className="flex items-start gap-2.5 text-xs text-zinc-650 bg-white border border-zinc-100 p-3 rounded-xl shadow-sm">
+                              <span className="w-5 h-5 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center font-bold text-[10px] shrink-0">{idx + 1}</span>
+                              <p className="flex-1 font-light leading-relaxed select-text">{advice}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                  </div>
+                )}
+
+
+                {/* 6. LINK INTELLIGENCE DETAILS TAB (Always Available) */}
+                {activeAsset === 'link-intel' && result.linkIntel && (
+                  <div className="space-y-4 animate-slide-up-in">
+
+                    {/* VirusTotal Safety Scan */}
+                    {result.linkIntel.virusTotal ? (
+                      <div>
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1 mb-2">
+                          <ShieldCheck size={10} />
+                          VirusTotal Real-Time Safety Scan
+                        </span>
+                        <div className={`p-3.5 rounded-xl border ${result.linkIntel.virusTotal.malicious > 0 ? 'bg-rose-50 border-rose-200' : result.linkIntel.virusTotal.suspicious > 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                          <div className="flex items-center gap-2 mb-2.5">
+                            {result.linkIntel.virusTotal.malicious > 0 ? (
+                              <XCircle size={18} className="text-rose-600 shrink-0" />
+                            ) : result.linkIntel.virusTotal.suspicious > 0 ? (
+                              <AlertTriangle size={18} className="text-amber-600 shrink-0" />
+                            ) : (
+                              <CheckCircle size={18} className="text-emerald-600 shrink-0" />
+                            )}
+                            <span className={`text-sm font-bold ${result.linkIntel.virusTotal.malicious > 0 ? 'text-rose-700' : result.linkIntel.virusTotal.suspicious > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                              {result.linkIntel.virusTotal.malicious > 0 ? `⚠️ Malicious – ${result.linkIntel.virusTotal.malicious} engines flagged this URL!` : result.linkIntel.virusTotal.suspicious > 0 ? `⚠️ Suspicious – ${result.linkIntel.virusTotal.suspicious} engines reported suspicious activity` : '✅ Clean – No threats detected across all security engines'}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-4 gap-1.5 text-center">
+                            {[
+                              { label: 'Harmless', value: result.linkIntel.virusTotal.harmless, color: 'text-emerald-600' },
+                              { label: 'Malicious', value: result.linkIntel.virusTotal.malicious, color: 'text-rose-600' },
+                              { label: 'Suspicious', value: result.linkIntel.virusTotal.suspicious, color: 'text-amber-600' },
+                              { label: 'Undetected', value: result.linkIntel.virusTotal.undetected, color: 'text-zinc-500' },
+                            ].map(item => (
+                              <div key={item.label} className="bg-white/80 rounded-lg p-2 border border-white shadow-sm">
+                                <span className={`text-lg font-black ${item.color}`}>{item.value}</span>
+                                <span className="text-[9px] text-zinc-400 font-medium block">{item.label}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex items-center justify-between mt-2">
+                            <span className="text-[9px] text-zinc-400">{result.linkIntel.virusTotal.total} engines scanned · Last: {result.linkIntel.virusTotal.lastAnalysisDate}</span>
+                            <a href={result.linkIntel.virusTotal.permalink} target="_blank" rel="noopener noreferrer" className="text-[9px] font-semibold text-violet-600 hover:underline">View Full Report →</a>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl border bg-zinc-50 border-zinc-200">
+                        {result.linkIntel.safe ? <ShieldCheck size={18} className="text-emerald-500" /> : <ShieldAlert size={18} className="text-rose-500" />}
+                        <span className="text-xs font-semibold text-zinc-600">{result.linkIntel.safe ? 'Domain appears safe (keyword analysis)' : 'Suspicious keywords detected in URL'}</span>
+                      </div>
+                    )}
+
+                    {/* WHOIS Domain Info */}
+                    {result.linkIntel.whois && (
+                      <div>
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1 mb-2">
+                          <Building2 size={10} />
+                          Domain WHOIS Registration
+                        </span>
+                        <div className="bg-zinc-50 border border-zinc-100 rounded-xl p-3 space-y-1.5 font-mono text-[10px]">
+                          {[
+                            { label: 'Registrar', value: result.linkIntel.whois.registrar },
+                            { label: 'Registrant Org', value: result.linkIntel.whois.registrantOrg },
+                            { label: 'Country', value: result.linkIntel.whois.registrantCountry },
+                            { label: 'Created Date', value: result.linkIntel.whois.createdDate },
+                            { label: 'Expiry Date', value: result.linkIntel.whois.expiresDate },
+                            { label: 'Last Updated', value: result.linkIntel.whois.updatedDate },
+                            ...(result.linkIntel.whois.domainAge ? [{ label: 'Domain Age', value: `${result.linkIntel.whois.domainAge} days (~${Math.floor(result.linkIntel.whois.domainAge / 365)} years)` }] : []),
+                          ].map(row => (
+                            <div key={row.label} className="flex justify-between border-b border-zinc-200/40 pb-1">
+                              <span className="text-zinc-400 font-bold">{row.label}</span>
+                              <span className="text-zinc-700 font-medium max-w-[200px] truncate text-right">{row.value || '—'}</span>
+                            </div>
+                          ))}
+                          {result.linkIntel.whois.nameServers.length > 0 && (
+                            <div className="flex justify-between pt-0.5">
+                              <span className="text-zinc-400 font-bold">Name Servers</span>
+                              <span className="text-zinc-700 font-medium text-right max-w-[200px] truncate">{result.linkIntel.whois.nameServers.slice(0, 2).join(', ')}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* IP Geolocation */}
+                    {result.linkIntel.ipInfo ? (
+                      <div>
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1 mb-2">
+                          <MapPin size={10} />
+                          IP Geolocation (IPinfo)
+                        </span>
+                        <div className="bg-zinc-50 border border-zinc-100 rounded-xl p-3 grid grid-cols-1 xs:grid-cols-2 gap-2 font-mono text-[10px]">
+                          {[
+                            { label: 'IP Address', value: result.linkIntel.ipInfo.ip },
+                            { label: 'Hostname', value: result.linkIntel.ipInfo.hostname || '—' },
+                            { label: 'City', value: result.linkIntel.ipInfo.city || '—' },
+                            { label: 'Region', value: result.linkIntel.ipInfo.region || '—' },
+                            { label: 'Country', value: result.linkIntel.ipInfo.country || '—' },
+                            { label: 'Timezone', value: result.linkIntel.ipInfo.timezone || '—' },
+                            { label: 'ISP / ASN', value: result.linkIntel.ipInfo.org || '—' },
+                            { label: 'Coordinates', value: result.linkIntel.ipInfo.loc || '—' },
+                          ].map(row => (
+                            <div key={row.label} className="bg-white rounded-lg p-2 border border-zinc-100">
+                              <span className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider block">{row.label}</span>
+                              <span className="text-zinc-700 font-semibold truncate block" title={row.value}>{row.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {result.linkIntel.ipInfo.loc && (
+                          <a 
+                            href={`https://www.google.com/maps?q=${result.linkIntel.ipInfo.loc}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="mt-2 flex items-center gap-1.5 text-[10px] text-violet-600 hover:text-violet-700 font-semibold"
+                          >
+                            <MapPin size={10} />
+                            View server location on Google Maps →
+                          </a>
+                        )}
+                      </div>
+                    ) : (
+                      <div>
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1 mb-2">
+                          <Wifi size={10} />
+                          IP / DNS Details
+                        </span>
+                        <div className="bg-zinc-50 border border-zinc-100 rounded-xl p-3 font-mono text-[10px] text-zinc-600 space-y-1">
+                          <div className="flex justify-between">
+                            <span className="text-zinc-400">Host IP</span>
+                            <span className="font-semibold">{result.linkIntel.ipAddress}</span>
+                          </div>
+                          {result.linkIntel.dnsRecords.map((rec, i) => (
+                            <div key={i} className="flex justify-between border-t border-zinc-200/40 pt-1 mt-1">
+                              <span className="text-zinc-400">{rec.type}</span>
+                              <span className="font-semibold max-w-[160px] truncate">{rec.records.join(', ')}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* DNS Records (shown alongside ipInfo) */}
+                    {result.linkIntel.ipInfo && result.linkIntel.dnsRecords.length > 0 && (
+                      <div>
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1 mb-2">
+                          <Wifi size={10} />
+                          DNS Records
+                        </span>
+                        <div className="bg-zinc-50 border border-zinc-100 rounded-xl p-3 font-mono text-[10px] text-zinc-600 space-y-1">
+                          {result.linkIntel.dnsRecords.map((rec, i) => (
+                            <div key={i} className={`flex justify-between ${i > 0 ? 'border-t border-zinc-200/40 pt-1 mt-1' : ''}`}>
+                              <span className="text-zinc-400 font-bold shrink-0 mr-2">{rec.type}</span>
+                              <span className="font-semibold max-w-[220px] truncate text-right">{rec.records.join(', ')}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SSL Certificate Details */}
+                    {result.sslCertificate && (
+                      <div>
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1 mb-2">
+                          <ShieldCheck size={10} className="text-emerald-500" />
+                          SSL Certificate Analysis
+                        </span>
+                        <div className={`p-3.5 rounded-xl border ${result.sslCertificate.valid ? 'bg-emerald-50/40 border-emerald-200/50' : 'bg-rose-50/40 border-rose-200/50'} space-y-2 font-mono text-[10px]`}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            {result.sslCertificate.valid ? (
+                              <CheckCircle size={15} className="text-emerald-600 shrink-0" />
+                            ) : (
+                              <XCircle size={15} className="text-rose-600 shrink-0" />
+                            )}
+                            <span className={`text-xs font-bold ${result.sslCertificate.valid ? 'text-emerald-700' : 'text-rose-700'}`}>
+                              {result.sslCertificate.valid ? 'Valid SSL Security (HTTPS Active)' : 'Invalid or Expired SSL Security'}
+                            </span>
+                          </div>
+                          {[
+                            { label: 'Common Name / Subject', value: result.sslCertificate.subject },
+                            { label: 'Certificate Issuer', value: result.sslCertificate.issuer },
+                            { label: 'Encryption Strength', value: `${result.sslCertificate.bits}-bit keys` },
+                            { label: 'Serial Number', value: result.sslCertificate.serialNumber },
+                            { label: 'Validity Period Start', value: new Date(result.sslCertificate.validFrom).toLocaleDateString() },
+                            { label: 'Validity Period End', value: new Date(result.sslCertificate.validTo).toLocaleDateString() },
+                            { label: 'Days Until Expiry', value: `${result.sslCertificate.daysRemaining} days remaining` }
+                          ].map(row => (
+                            <div key={row.label} className="flex justify-between border-b border-zinc-200/30 pb-1">
+                              <span className="text-zinc-400 font-bold">{row.label}</span>
+                              <span className="text-zinc-700 font-medium max-w-[200px] truncate text-right">{row.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Robots.txt & Sitemaps */}
+                    {result.robotsTxt && (result.robotsTxt.rulesCount > 0 || result.robotsTxt.sitemaps.length > 0) && (
+                      <div>
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1 mb-2">
+                          <GlobeIcon size={10} />
+                          Robots.txt & Sitemap Index
+                        </span>
+                        <div className="bg-zinc-50 border border-zinc-150 rounded-xl p-3 space-y-2 font-mono text-[10px]">
+                          <div className="flex justify-between border-b border-zinc-200/40 pb-1">
+                            <span className="text-zinc-400 font-bold">Total Directory Rules</span>
+                            <span className="text-zinc-700 font-medium">{result.robotsTxt.rulesCount} lines found</span>
+                          </div>
+                          
+                          {/* Sitemaps */}
+                          {result.robotsTxt.sitemaps.length > 0 && (
+                            <div className="space-y-1">
+                              <span className="text-zinc-400 font-bold block">XML Sitemap Index:</span>
+                              <div className="space-y-1">
+                                {result.robotsTxt.sitemaps.slice(0, 3).map((sm, i) => (
+                                  <a 
+                                    key={i} 
+                                    href={sm} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer" 
+                                    className="text-violet-600 hover:underline flex items-center gap-1 truncate font-medium"
+                                  >
+                                    <span className="truncate flex-1">{sm}</span>
+                                    <ExternalLink size={8} className="shrink-0" />
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Restricted Paths */}
+                          {result.robotsTxt.disallows.length > 0 && (
+                            <div className="space-y-0.5 pt-1.5 border-t border-zinc-200/40">
+                              <span className="text-zinc-400 font-bold block">Disallowed Paths / Directories:</span>
+                              <div className="flex flex-wrap gap-1.5 pt-1">
+                                {result.robotsTxt.disallows.slice(0, 8).map((p, i) => (
+                                  <span key={i} className="px-1.5 py-0.5 bg-zinc-100 border border-zinc-200 text-zinc-500 rounded text-[9px] font-semibold">{p}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Redirect Chain + Short URL */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block mb-1.5">Redirect Chain</span>
+                        <div className="space-y-1.5 bg-zinc-50 p-3 rounded-xl border border-zinc-100 font-mono text-[10px] text-zinc-600">
+                          {result.linkIntel.redirectChain.map((u, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <span className="w-4 h-4 bg-zinc-200 text-zinc-600 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0">{i + 1}</span>
+                              <span className="truncate flex-1">{u}</span>
+                              {i < result.linkIntel!.redirectChain.length - 1 && (
+                                <ArrowDown size={10} className="text-zinc-400 shrink-0" />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-3">
+                        {result.linkIntel.shortUrl && (
+                          <div>
+                            <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block mb-1">Short URL</span>
+                            <div className="flex items-center gap-2 bg-zinc-50 p-2.5 rounded-xl border border-zinc-100">
+                              <span className="text-xs font-semibold text-zinc-700 flex-1 truncate">{result.linkIntel.shortUrl}</span>
+                              <button 
+                                onClick={() => handleCopyText(result.linkIntel!.shortUrl, 'short-url')}
+                                className="p-2 bg-white hover:bg-zinc-100 border border-zinc-200/50 text-zinc-600 rounded-lg cursor-pointer transition-colors"
+                              >
+                                {copiedText['short-url'] ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {result.linkIntel.headers && Object.keys(result.linkIntel.headers).length > 0 && (
+                          <div className="flex-1">
+                            <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block mb-1.5">Server Headers</span>
+                            <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-100 font-mono text-[9px] text-zinc-500 overflow-y-auto max-h-[100px] space-y-1">
+                              {Object.entries(result.linkIntel.headers).map(([k, v]) => (
+                                <div key={k} className="flex justify-between border-b border-zinc-150 pb-0.5">
+                                  <span className="text-zinc-400 font-bold shrink-0 mr-2">{k}</span>
+                                  <span className="text-zinc-600 truncate max-w-[160px]" title={v}>{v}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Tech Stack */}
+                    {result.techStack && result.techStack.length > 0 && (
+                      <div>
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1 mb-2">
+                          <Layers size={10} />
+                          Detected Technology Stack
+                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          {result.techStack.map((tech, i) => (
+                            <span key={i} className="px-2.5 py-1 bg-violet-50 border border-violet-100 text-violet-700 rounded-full text-[10px] font-semibold">{tech}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                  </div>
+                )}
+
+                {/* 7. AI CREATOR TOOLS TAB (Always Available) */}
+                {activeAsset === 'ai-tools' && result.aiSuggestions && (
+                  <div className="space-y-4.5 animate-slide-up-in">
+                    
+                    {/* Catchy captions */}
+                    <div className="space-y-2">
+                      <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                        <Sparkles size={11} className="text-violet-500" />
+                        AI Creative Social Captions
+                      </span>
+                      <div className="space-y-2">
+                        {result.aiSuggestions.captions.map((cap, i) => (
+                          <div key={i} className="flex items-start gap-2 bg-zinc-50 border border-zinc-100 p-3 rounded-xl">
+                            <p className="text-xs text-zinc-600 leading-relaxed flex-1 font-light select-text">{cap}</p>
+                            <button
+                              onClick={() => handleCopyText(cap, `cap-${i}`)}
+                              className="p-1.5 bg-white border border-zinc-200/50 hover:bg-zinc-100 rounded-lg text-zinc-400 hover:text-zinc-700 cursor-pointer transition-all shrink-0"
+                              title="Copy caption"
+                            >
+                              {copiedText[`cap-${i}`] ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Catchy optimized titles */}
+                    <div className="space-y-2">
+                      <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                        <Sparkles size={11} className="text-violet-500" />
+                        Video / Post Title Optimizers
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {result.aiSuggestions.optimizedTitles.map((titleText, i) => (
+                          <div key={i} className="bg-zinc-50 border border-zinc-100 p-3 rounded-xl flex flex-col justify-between gap-2.5">
+                            <span className="text-xs font-semibold text-zinc-700 leading-snug line-clamp-3 select-text">{titleText}</span>
+                            <button
+                              onClick={() => handleCopyText(titleText, `title-${i}`)}
+                              className="text-[10px] text-violet-600 hover:text-violet-700 font-bold flex items-center gap-1 cursor-pointer transition-all self-end"
+                            >
+                              {copiedText[`title-${i}`] ? <Check size={10} className="text-emerald-500" /> : <Copy size={10} />}
+                              {copiedText[`title-${i}`] ? 'Copied' : 'Copy'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* SEO Description */}
+                    <div className="space-y-2">
+                      <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                        <Sparkles size={11} className="text-violet-500" />
+                        Optimized SEO Meta Description
+                      </span>
+                      <div className="flex items-start gap-2 bg-zinc-50 border border-zinc-100 p-3 rounded-xl">
+                        <p className="text-xs text-zinc-500 leading-relaxed flex-1 select-text">{result.aiSuggestions.seoDescription}</p>
+                        <button
+                          onClick={() => handleCopyText(result.aiSuggestions!.seoDescription, 'seo-desc')}
+                          className="p-2 bg-white border border-zinc-200/50 hover:bg-zinc-100 rounded-lg text-zinc-400 hover:text-zinc-700 cursor-pointer transition-all shrink-0"
+                          title="Copy SEO description"
+                        >
+                          {copiedText['seo-desc'] ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Hashtags */}
+                    {(result.aiSuggestions.hashtags || result.hashtags) && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                            <Sparkles size={11} className="text-violet-500" />
+                            Trending Hashtags
+                          </span>
+                          <button
+                            onClick={() => handleCopyText((result.aiSuggestions!.hashtags || result.hashtags || []).join(' '), 'all-hashtags')}
+                            className="text-[9px] font-semibold text-violet-600 hover:text-violet-700 flex items-center gap-1 cursor-pointer"
+                          >
+                            {copiedText['all-hashtags'] ? <><Check size={9} className="text-emerald-500" /> Copied All!</> : <><Copy size={9} /> Copy All</>}
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(result.aiSuggestions.hashtags || result.hashtags || []).map((tag, i) => (
+                            <button
+                              key={i}
+                              onClick={() => handleCopyText(tag, `tag-${i}`)}
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all cursor-pointer ${copiedText[`tag-${i}`] ? 'bg-emerald-100 border border-emerald-200 text-emerald-700' : 'bg-violet-50 border border-violet-100 text-violet-700 hover:bg-violet-100'}`}
+                            >
+                              {copiedText[`tag-${i}`] ? '✓ ' : ''}{tag}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                  </div>
+                )}
+
+
+                {/* 8. CREATOR/AUTHOR DETAILS TAB */}
+                {activeAsset === 'author' && (
+                  <div className="space-y-4 animate-slide-up-in">
+                    <div className="bg-zinc-50 border border-zinc-100 rounded-xl p-5 flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-violet-100 border border-violet-200 flex items-center justify-center text-violet-600">
+                        <UserIcon size={20} />
+                      </div>
+                      <div>
+                        <span className="text-[10px] tracking-widest text-zinc-400 font-semibold uppercase">Content Creator</span>
+                        <h4 className="text-base font-semibold text-zinc-800 mt-0.5">{result.author}</h4>
+                      </div>
+                    </div>
+                    
+                    <div className="text-xs font-light text-zinc-500 leading-relaxed">
+                      This content was published by <strong className="font-semibold text-zinc-700">{result.author}</strong> on <strong className="font-semibold text-zinc-700">{result.domain}</strong>. You can view the creator profile or channel content by visiting the platform directly.
+                    </div>
+
+                    <a
+                      href={result.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex w-full py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+                    >
+                      <span>Visit Creator Profile</span>
+                      <ExternalLink size={14} />
+                    </a>
+                  </div>
+                )}
+
+                {/* 9. HASHTAGS DETAILS TAB */}
+                {activeAsset === 'tags' && (
+                  <div className="space-y-5 animate-slide-up-in">
+                    <div>
+                      <span className="text-[10px] tracking-widest text-zinc-400 font-semibold uppercase block mb-2">Identified Tags</span>
+                      <div className="flex flex-wrap gap-2">
+                        {result.hashtags?.map((tag, idx) => (
+                          <span 
+                            key={idx} 
+                            className="bg-violet-50 text-violet-600 border border-violet-100/60 px-3 py-1.5 rounded-lg text-xs font-medium select-text"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <button
+                        onClick={() => copyTags(result.hashtags || [])}
+                        className="flex-1 py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+                      >
+                        {copiedIndex ? (
+                          <>
+                            <Check size={14} className="text-emerald-400" />
+                            <span>Tags Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={14} />
+                            <span>Copy All Tags</span>
+                          </>
+                        )}
+                      </button>
+                      
+                      <a
+                        href={result.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 py-3.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer border border-zinc-200/50"
+                      >
+                        <span>Search Tags on Platform</span>
+                        <ExternalLink size={14} />
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Footer copyright */}
+      <footer className="absolute bottom-6 text-center select-none text-[10px] tracking-widest text-zinc-300 font-light">
+        DESIGN RESOURCE &copy; {new Date().getFullYear()}
+      </footer>
+
+      {/* SVG Liquid Distortion Filter */}
+      <svg width="0" height="0" className="absolute pointer-events-none">
+        <defs>
+          <filter id="liquid-distortion">
+            <feTurbulence type="fractalNoise" baseFrequency="0.03 0.03" numOctaves="3" seed="0" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="8" xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+        </defs>
+      </svg>
+    </div>
+  );
+}
