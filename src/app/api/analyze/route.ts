@@ -463,12 +463,122 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const rawUrl = body.url;
+    const scanType = body.scanType || 'base';
     if (!rawUrl || typeof rawUrl !== 'string') {
       return NextResponse.json({ success: false, error: 'URL is required' }, { status: 400 });
     }
 
     const url = cleanUrl(rawUrl);
     const originalDomain = getDomainName(url);
+
+    // Early interception for lazy-loaded scan types that only target websites
+    if (scanType === 'intel' || scanType === 'lighthouse' || scanType === 'ai-research') {
+      // 1. Resolve redirect chain, hostname, and ipAddress
+      let finalUrl = url;
+      const redirectChain: string[] = [url];
+      let contentTypeHeader = 'text/html';
+      const responseHeadersObj: Record<string, string> = {};
+
+      try {
+        const redirectRes = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          },
+          redirect: 'follow',
+          signal: AbortSignal.timeout(8000),
+        });
+        finalUrl = redirectRes.url || url;
+        if (finalUrl !== url) redirectChain.push(finalUrl);
+        contentTypeHeader = redirectRes.headers.get('content-type') || 'text/html';
+        ['server', 'cache-control', 'content-encoding', 'x-powered-by', 'x-frame-options', 'strict-transport-security', 'content-security-policy'].forEach(k => {
+          const v = redirectRes.headers.get(k);
+          if (v) responseHeadersObj[k] = v;
+        });
+      } catch (e) { console.error('Redirect follow failed:', e); }
+
+      const finalDomain = getDomainName(finalUrl);
+      const hostname = getHostname(finalUrl);
+
+      let ipAddress = 'Unknown';
+      const dnsRecords: Array<{ type: string; records: string[] }> = [];
+      if (hostname && hostname !== 'localhost') {
+        try {
+          const lookup = await dns.promises.lookup(hostname);
+          ipAddress = lookup.address;
+          dnsRecords.push({ type: 'A (IPv4 Address)', records: [ipAddress] });
+        } catch (e) { console.error('DNS lookup failed:', e); }
+      }
+
+      if (scanType === 'intel') {
+        const [shortUrlR, vtR, ipInfoR, whoisR, sslR, robotsR] = await Promise.allSettled([
+          getShortUrl(finalUrl),
+          scanWithVirusTotal(finalUrl),
+          fetchIPInfo(ipAddress),
+          fetchWhoisData(finalDomain),
+          fetchSslDetails(finalDomain),
+          fetchRobotsTxt(finalDomain),
+        ]);
+        const ssl = sslR.status === 'fulfilled' ? sslR.value : null;
+        const robots = robotsR.status === 'fulfilled' ? robotsR.value : null;
+        const vt = vtR.status === 'fulfilled' ? vtR.value : null;
+        return NextResponse.json({
+          success: true,
+          sslCertificate: ssl,
+          robotsTxt: robots,
+          linkIntel: {
+            redirectChain, ipAddress, dnsRecords,
+            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
+            whois: whoisR.status === 'fulfilled' ? whoisR.value : null,
+            virusTotal: vt,
+            safe: vt ? vt.safe : true,
+            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
+            headers: responseHeadersObj,
+          },
+        });
+      }
+
+      let htmlTextContent = '';
+      try {
+        const ctrlr = new AbortController();
+        const tid = setTimeout(() => ctrlr.abort(), 8000);
+        const gr = await fetch(finalUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' },
+          signal: ctrlr.signal,
+        });
+        clearTimeout(tid);
+        htmlTextContent = await gr.text();
+      } catch {}
+
+      const cheerioInstance = cheerio.load(htmlTextContent);
+
+      if (scanType === 'lighthouse') {
+        const auditData = runLighthouseAudit(htmlTextContent, responseHeadersObj, cheerioInstance);
+        return NextResponse.json({
+          success: true,
+          lighthouseAudit: auditData
+        });
+      }
+
+      if (scanType === 'ai-research') {
+        const getMeta = (names: string[]) => { for (const n of names) { const c = cheerioInstance(`meta[property="${n}"]`).attr('content') || cheerioInstance(`meta[name="${n}"]`).attr('content') || cheerioInstance(`meta[itemprop="${n}"]`).attr('content'); if (c) return c.trim(); } return ''; };
+        const parsedTitle = getMeta(['og:title', 'twitter:title']) || cheerioInstance('title').text()?.trim() || finalDomain;
+        const parsedDesc = getMeta(['og:description', 'twitter:description', 'description']) || 'No description available.';
+        const geminiIntel = await fetchGeminiIntelligence(parsedTitle, parsedDesc, htmlTextContent, finalDomain);
+        return NextResponse.json({
+          success: true,
+          geminiResearch: geminiIntel
+        });
+      }
+    }
+
+    if (scanType === 'image-tools') {
+      const imgAnalysis = await analyzeImageGemini(url);
+      return NextResponse.json({
+        success: true,
+        imageAnalysis: imgAnalysis
+      });
+    }
 
     // --- Direct media file detection ---
     const lowerUrl = url.toLowerCase();
@@ -536,26 +646,19 @@ export async function POST(request: NextRequest) {
       const contentType = isDirectImage ? 'image' : isDirectVideo ? 'video' : 'audio';
       const previewUrl = isDirectImage ? finalUrl : undefined;
 
-      const [shortUrlR, vtR, ipInfoR, imageAnalysis] = await Promise.allSettled([
-        getShortUrl(finalUrl),
-        scanWithVirusTotal(finalUrl),
-        fetchIPInfo(ipAddress),
-        isDirectImage ? analyzeImageGemini(finalUrl) : Promise.resolve(null),
-      ]);
-      const shortUrl = shortUrlR.status === 'fulfilled' ? shortUrlR.value : '';
-      const vt = vtR.status === 'fulfilled' ? vtR.value : null;
-      const ipInfo = ipInfoR.status === 'fulfilled' ? ipInfoR.value : null;
-      const imgTags = imageAnalysis.status === 'fulfilled' ? imageAnalysis.value : null;
-
-      const aiData = await generateAiContentGemini(filename, `Direct ${contentType} file`, platform, finalDomain) || generateAiTemplate(filename, `Direct ${contentType} file`, platform);
+      if (scanType === 'ai-writer') {
+        const aiData = await generateAiContentGemini(filename, `Direct ${contentType} file`, platform, finalDomain) || generateAiTemplate(filename, `Direct ${contentType} file`, platform);
+        return NextResponse.json({
+          success: true,
+          aiSuggestions: aiData
+        });
+      }
 
       return NextResponse.json({
         success: true, url: finalUrl, domain: finalDomain, platform, contentType, title: filename,
         previewUrl: previewUrl || '',
         mediaUrls: [finalUrl],
-        aiSuggestions: aiData,
-        imageAnalysis: imgTags,
-        linkIntel: { redirectChain, ipAddress, ipInfo, dnsRecords, whois: null, virusTotal: vt, safe: vt ? vt.safe : true, shortUrl, headers: responseHeadersObj },
+        linkIntel: { redirectChain, ipAddress, ipInfo: null, dnsRecords, whois: null, virusTotal: null, safe: true, shortUrl: '', headers: responseHeadersObj },
       });
     }
 
@@ -610,27 +713,19 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        const [shortUrlR, vtR, ipInfoR, whoisR, aiR] = await Promise.allSettled([
-          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
-          fetchWhoisData('youtube.com'),
-          generateAiContentGemini(title, description, 'YouTube', 'youtube.com'),
-        ]);
-        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, description, 'YouTube');
+        if (scanType === 'ai-writer') {
+          const aiData = await generateAiContentGemini(title, description, 'YouTube', 'youtube.com') || generateAiTemplate(title, description, 'YouTube');
+          return NextResponse.json({
+            success: true,
+            aiSuggestions: aiData
+          });
+        }
 
         return NextResponse.json({
           success: true, url: finalUrl, domain: finalDomain, platform: 'youtube', contentType: videoId ? 'video' : 'website',
           title, description, previewUrl, embedUrl: embedUrl || undefined, author, duration,
           mediaUrls: previewUrl ? [previewUrl] : [],
-          aiSuggestions: aiData,
-          linkIntel: {
-            redirectChain, ipAddress, dnsRecords,
-            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
-            whois: whoisR.status === 'fulfilled' ? whoisR.value : null,
-            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
-            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
-            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
-            headers: responseHeadersObj,
-          },
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
         console.error('YouTube handler error:', err);
@@ -655,27 +750,19 @@ export async function POST(request: NextRequest) {
             if (oe.ok) { const d = await oe.json(); title = d.title || title; author = d.author_name || author; description = d.description || description; previewUrl = d.thumbnail_url || ''; if (d.duration) { const s = parseInt(d.duration); duration = `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; } }
           } catch {}
         }
-        const [shortUrlR, vtR, ipInfoR, whoisR, aiR] = await Promise.allSettled([
-          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
-          fetchWhoisData('vimeo.com'),
-          generateAiContentGemini(title, description, 'Vimeo', 'vimeo.com'),
-        ]);
-        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, description, 'Vimeo');
+        if (scanType === 'ai-writer') {
+          const aiData = await generateAiContentGemini(title, description, 'Vimeo', 'vimeo.com') || generateAiTemplate(title, description, 'Vimeo');
+          return NextResponse.json({
+            success: true,
+            aiSuggestions: aiData
+          });
+        }
 
         return NextResponse.json({
           success: true, url: finalUrl, domain: finalDomain, platform: 'vimeo', contentType: 'video',
           title, description, previewUrl, embedUrl: embedUrl || undefined, author, duration,
           mediaUrls: previewUrl ? [previewUrl] : [],
-          aiSuggestions: aiData,
-          linkIntel: {
-            redirectChain, ipAddress, dnsRecords,
-            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
-            whois: whoisR.status === 'fulfilled' ? whoisR.value : null,
-            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
-            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
-            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
-            headers: responseHeadersObj,
-          },
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
         console.error('Vimeo handler error:', err);
@@ -724,26 +811,18 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        const [shortUrlR, vtR, ipInfoR, whoisR, aiR] = await Promise.allSettled([
-          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
-          fetchWhoisData('reddit.com'),
-          generateAiContentGemini(title, desc, 'Reddit', 'reddit.com'),
-        ]);
-        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, desc, 'Reddit');
+        if (scanType === 'ai-writer') {
+          const aiData = await generateAiContentGemini(title, desc, 'Reddit', 'reddit.com') || generateAiTemplate(title, desc, 'Reddit');
+          return NextResponse.json({
+            success: true,
+            aiSuggestions: aiData
+          });
+        }
 
         return NextResponse.json({
           success: true, url: finalUrl, domain: finalDomain, platform: 'reddit', contentType,
           title, description: desc, previewUrl, author, mediaUrls,
-          aiSuggestions: aiData,
-          linkIntel: {
-            redirectChain, ipAddress, dnsRecords,
-            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
-            whois: whoisR.status === 'fulfilled' ? whoisR.value : null,
-            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
-            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
-            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
-            headers: responseHeadersObj,
-          },
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
         console.error('Reddit handler error:', err);
@@ -765,26 +844,19 @@ export async function POST(request: NextRequest) {
           if (oe.ok) { const d = await oe.json(); title = d.title || title; author = d.author_name || author; previewUrl = d.thumbnail_url || ''; const vid = targetTiktokUrl.split('/').pop()?.split(/[?#]/)[0]; if (vid) embedUrl = `https://www.tiktok.com/embed/v2/${vid}`; }
         } catch {}
 
-        const [shortUrlR, vtR, ipInfoR, aiR] = await Promise.allSettled([
-          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
-          generateAiContentGemini(title, 'TikTok short video', 'TikTok', 'tiktok.com'),
-        ]);
-        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, 'TikTok short video', 'TikTok');
+        if (scanType === 'ai-writer') {
+          const aiData = await generateAiContentGemini(title, 'TikTok short video', 'TikTok', 'tiktok.com') || generateAiTemplate(title, 'TikTok short video', 'TikTok');
+          return NextResponse.json({
+            success: true,
+            aiSuggestions: aiData
+          });
+        }
 
         return NextResponse.json({
           success: true, url: finalUrl, domain: finalDomain, platform: 'tiktok', contentType: 'video',
           title, description: `TikTok video by @${author}`, previewUrl, embedUrl, author,
           mediaUrls: previewUrl ? [previewUrl] : [],
-          aiSuggestions: aiData,
-          linkIntel: {
-            redirectChain, ipAddress, dnsRecords,
-            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
-            whois: null,
-            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
-            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
-            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
-            headers: responseHeadersObj,
-          },
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
         console.error('TikTok handler error:', err);
@@ -804,27 +876,20 @@ export async function POST(request: NextRequest) {
         const code = match ? match[2] : '';
         const title = match ? `Instagram ${match[1].toUpperCase()}` : 'Instagram Post';
 
-        const [shortUrlR, vtR, ipInfoR, aiR] = await Promise.allSettled([
-          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
-          generateAiContentGemini(title, 'Instagram media post', 'Instagram', 'instagram.com'),
-        ]);
-        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, 'Instagram media post', 'Instagram');
+        if (scanType === 'ai-writer') {
+          const aiData = await generateAiContentGemini(title, 'Instagram media post', 'Instagram', 'instagram.com') || generateAiTemplate(title, 'Instagram media post', 'Instagram');
+          return NextResponse.json({
+            success: true,
+            aiSuggestions: aiData
+          });
+        }
 
         return NextResponse.json({
           success: true, url: finalUrl, domain: finalDomain, platform: 'instagram', contentType: 'video',
           title, description: 'View this content on Instagram.', previewUrl: '',
           embedUrl: code ? `https://www.instagram.com/p/${code}/embed/captioned/` : undefined,
           mediaUrls: [],
-          aiSuggestions: aiData,
-          linkIntel: {
-            redirectChain, ipAddress, dnsRecords,
-            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
-            whois: null,
-            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
-            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
-            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
-            headers: responseHeadersObj,
-          },
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
         console.error('Instagram handler error:', err);
@@ -845,26 +910,18 @@ export async function POST(request: NextRequest) {
         const embedUrl = tweetId ? `https://platform.twitter.com/embed/Tweet.html?id=${tweetId}` : undefined;
         const title = 'Tweet on Twitter / X';
 
-        const [shortUrlR, vtR, ipInfoR, whoisR, aiR] = await Promise.allSettled([
-          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
-          fetchWhoisData('x.com'),
-          generateAiContentGemini(title, 'Twitter/X post', 'Twitter', 'twitter.com'),
-        ]);
-        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, 'Twitter/X post', 'Twitter');
+        if (scanType === 'ai-writer') {
+          const aiData = await generateAiContentGemini(title, 'Twitter/X post', 'Twitter', 'twitter.com') || generateAiTemplate(title, 'Twitter/X post', 'Twitter');
+          return NextResponse.json({
+            success: true,
+            aiSuggestions: aiData
+          });
+        }
 
         return NextResponse.json({
           success: true, url: finalUrl, domain: finalDomain, platform: 'twitter', contentType: embedUrl ? 'video' : 'website',
           title, description: 'Read this post on Twitter / X.', previewUrl: '', embedUrl, mediaUrls: [],
-          aiSuggestions: aiData,
-          linkIntel: {
-            redirectChain, ipAddress, dnsRecords,
-            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
-            whois: whoisR.status === 'fulfilled' ? whoisR.value : null,
-            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
-            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
-            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
-            headers: responseHeadersObj,
-          },
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
         console.error('Twitter/X handler error:', err);
@@ -884,25 +941,18 @@ export async function POST(request: NextRequest) {
         const embedUrl = isFbVideo ? `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(targetFbUrl)}&show_text=0` : undefined;
         const title = `Facebook ${isFbVideo ? 'Video' : 'Post'}`;
 
-        const [shortUrlR, vtR, ipInfoR, aiR] = await Promise.allSettled([
-          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
-          generateAiContentGemini(title, 'Facebook media content', 'Facebook', 'facebook.com'),
-        ]);
-        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, 'Facebook content', 'Facebook');
+        if (scanType === 'ai-writer') {
+          const aiData = await generateAiContentGemini(title, 'Facebook media content', 'Facebook', 'facebook.com') || generateAiTemplate(title, 'Facebook content', 'Facebook');
+          return NextResponse.json({
+            success: true,
+            aiSuggestions: aiData
+          });
+        }
 
         return NextResponse.json({
           success: true, url: finalUrl, domain: finalDomain, platform: 'facebook', contentType: isFbVideo ? 'video' : 'website',
           title, description: 'View this post on Facebook.', previewUrl: '', embedUrl, mediaUrls: [],
-          aiSuggestions: aiData,
-          linkIntel: {
-            redirectChain, ipAddress, dnsRecords,
-            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
-            whois: null,
-            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
-            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
-            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
-            headers: responseHeadersObj,
-          },
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
         console.error('Facebook handler error:', err);
@@ -924,26 +974,18 @@ export async function POST(request: NextRequest) {
           if (pr.ok) { const $ = cheerio.load(await pr.text()); title = $('meta[property="og:title"]').attr('content') || $('title').text()?.trim() || title; description = $('meta[property="og:description"]').attr('content') || description; previewUrl = $('meta[property="og:image"]').attr('content') || ''; }
         } catch {}
 
-        const [shortUrlR, vtR, ipInfoR, whoisR, aiR] = await Promise.allSettled([
-          getShortUrl(finalUrl), scanWithVirusTotal(finalUrl), fetchIPInfo(ipAddress),
-          fetchWhoisData('pinterest.com'),
-          generateAiContentGemini(title, description, 'Pinterest', 'pinterest.com'),
-        ]);
-        const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : generateAiTemplate(title, description, 'Pinterest');
+        if (scanType === 'ai-writer') {
+          const aiData = await generateAiContentGemini(title, description, 'Pinterest', 'pinterest.com') || generateAiTemplate(title, description, 'Pinterest');
+          return NextResponse.json({
+            success: true,
+            aiSuggestions: aiData
+          });
+        }
 
         return NextResponse.json({
           success: true, url: finalUrl, domain: finalDomain, platform: 'pinterest', contentType: 'image',
           title, description, previewUrl, mediaUrls: previewUrl ? [previewUrl] : [],
-          aiSuggestions: aiData,
-          linkIntel: {
-            redirectChain, ipAddress, dnsRecords,
-            ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
-            whois: whoisR.status === 'fulfilled' ? whoisR.value : null,
-            virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
-            safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
-            shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
-            headers: responseHeadersObj,
-          },
+          linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
         console.error('Pinterest handler error:', err);
@@ -1001,41 +1043,24 @@ export async function POST(request: NextRequest) {
     // Detect tech stack using advanced engine
     const techStack = detectTechStack(htmlText, responseHeadersObj);
 
-    // Run all link intelligence in parallel
-    const [shortUrlR, vtR, ipInfoR, whoisR, aiR, sslR, robotsR, geminiIntelR] = await Promise.allSettled([
-      getShortUrl(finalUrl),
-      scanWithVirusTotal(finalUrl),
-      fetchIPInfo(ipAddress),
-      fetchWhoisData(finalDomain),
-      generateAiContentGemini(parsedTitle, parsedDesc, 'Website', finalDomain),
-      fetchSslDetails(finalDomain),
-      fetchRobotsTxt(finalDomain),
-      fetchGeminiIntelligence(parsedTitle, parsedDesc, htmlText, finalDomain),
-    ]);
+    if (scanType === 'ai-writer') {
+      const aiData = await generateAiContentGemini(parsedTitle, parsedDesc, 'Website', finalDomain) || { ...generateAiTemplate(parsedTitle, parsedDesc, 'Website'), hashtags };
+      return NextResponse.json({
+        success: true,
+        aiSuggestions: aiData
+      });
+    }
 
-    const aiData = (aiR.status === 'fulfilled' && aiR.value) ? aiR.value : { ...generateAiTemplate(parsedTitle, parsedDesc, 'Website'), hashtags };
-    const ssl = sslR.status === 'fulfilled' ? sslR.value : null;
-    const robots = robotsR.status === 'fulfilled' ? robotsR.value : null;
-    const geminiIntel = geminiIntelR.status === 'fulfilled' ? geminiIntelR.value : null;
-    const auditData = runLighthouseAudit(htmlText, responseHeadersObj, $);
-
+    // Base scan (Skip all heavy APIs)
     return NextResponse.json({
       success: true, url: finalUrl, domain: finalDomain, platform: 'website', contentType,
       title: parsedTitle, description: parsedDesc, previewUrl: ogImage, mediaUrls: ogImage ? [ogImage] : [],
       embedUrl: ogVideo || undefined, author: author || undefined, hashtags,
       techStack: techStack.length > 0 ? techStack : undefined,
-      aiSuggestions: aiData,
-      geminiResearch: geminiIntel,
-      lighthouseAudit: auditData,
-      sslCertificate: ssl,
-      robotsTxt: robots,
       linkIntel: {
         redirectChain, ipAddress, dnsRecords,
-        ipInfo: ipInfoR.status === 'fulfilled' ? ipInfoR.value : null,
-        whois: whoisR.status === 'fulfilled' ? whoisR.value : null,
-        virusTotal: vtR.status === 'fulfilled' ? vtR.value : null,
-        safe: vtR.status === 'fulfilled' && vtR.value ? vtR.value.safe : true,
-        shortUrl: shortUrlR.status === 'fulfilled' ? shortUrlR.value : '',
+        safe: true,
+        shortUrl: '',
         headers: responseHeadersObj,
       },
     });

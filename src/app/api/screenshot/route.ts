@@ -16,21 +16,13 @@ function getExecutablePath(): string | undefined {
 }
 
 export async function POST(request: NextRequest) {
-  let browser = null;
+  let browser: any = null;
   try {
     const body = await request.json();
     const { url, device = 'desktop' } = body;
 
     if (!url) {
       return NextResponse.json({ success: false, error: 'URL parameter is required' }, { status: 400 });
-    }
-
-    const execPath = getExecutablePath();
-    if (!execPath) {
-      return NextResponse.json({ 
-        success: false, 
-        error: 'No suitable local browser found (Chrome or Edge). Please install a browser on the server.' 
-      }, { status: 500 });
     }
 
     // Determine viewport and user agent
@@ -52,38 +44,73 @@ export async function POST(request: NextRequest) {
       hasTouch = true;
     }
 
-    browser = await puppeteer.launch({
-      executablePath: execPath,
-      headless: true,
-      args: [
-        '--no-sandbox', 
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-web-security'
-      ]
-    });
+    const execPath = getExecutablePath();
+    let screenshotBuffer: Buffer | null = null;
 
-    const page = await browser.newPage();
-    await page.setViewport({ width, height, isMobile, hasTouch });
-    await page.setUserAgent(userAgent);
+    if (execPath) {
+      try {
+        browser = await puppeteer.launch({
+          executablePath: execPath,
+          headless: true,
+          args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-web-security'
+          ]
+        });
 
-    // Set a timeout of 15 seconds for navigation
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 15000 });
+        const page = await browser.newPage();
+        await page.setViewport({ width, height, isMobile, hasTouch });
+        await page.setUserAgent(userAgent);
 
-    // Inject styles to hide scrollbars for cleaner screenshots
-    await page.addStyleTag({
-      content: 'body::-webkit-scrollbar { display: none; } body { -ms-overflow-style: none; scrollbar-width: none; }'
-    });
+        // Set a timeout of 15 seconds for navigation
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 15000 });
 
-    // Wait brief moment for dynamic animations
-    await new Promise(r => setTimeout(r, 1000));
+        // Inject styles to hide scrollbars for cleaner screenshots
+        await page.addStyleTag({
+          content: 'body::-webkit-scrollbar { display: none; } body { -ms-overflow-style: none; scrollbar-width: none; }'
+        });
 
-    const screenshotBuffer = await page.screenshot({
-      type: 'png',
-      fullPage: false
-    });
+        // Wait brief moment for dynamic animations
+        await new Promise(r => setTimeout(r, 1000));
 
-    const base64Image = `data:image/png;base64,${Buffer.from(screenshotBuffer).toString('base64')}`;
+        const rawBuffer = await page.screenshot({
+          type: 'png',
+          fullPage: false
+        });
+        screenshotBuffer = Buffer.from(rawBuffer);
+      } catch (puppeteerError) {
+        console.warn('Local Puppeteer launch failed, trying Microlink fallback:', puppeteerError);
+      } finally {
+        if (browser) {
+          await browser.close();
+          browser = null;
+        }
+      }
+    }
+
+    // If local screenshot didn't succeed, trigger Microlink fallback
+    if (!screenshotBuffer) {
+      console.log(`Using Microlink Screenshot fallback for URL: ${url}`);
+      const microlinkUrl = `https://api.microlink.io?url=${encodeURIComponent(url)}&screenshot=true&viewport.width=${width}&viewport.height=${height}&viewport.isMobile=${isMobile}`;
+      const mRes = await fetch(microlinkUrl, { signal: AbortSignal.timeout(20000) });
+      if (!mRes.ok) {
+        throw new Error(`Microlink fallback returned status code: ${mRes.status}`);
+      }
+      const data = await mRes.json();
+      if (data.status === 'success' && data.data?.screenshot?.url) {
+        const imgRes = await fetch(data.data.screenshot.url, { signal: AbortSignal.timeout(15000) });
+        if (!imgRes.ok) {
+          throw new Error(`Failed to download fallback image: ${imgRes.status}`);
+        }
+        screenshotBuffer = Buffer.from(await imgRes.arrayBuffer());
+      } else {
+        throw new Error(data.message || 'Microlink API failed to generate screenshot');
+      }
+    }
+
+    const base64Image = `data:image/png;base64,${screenshotBuffer.toString('base64')}`;
 
     return NextResponse.json({
       success: true,

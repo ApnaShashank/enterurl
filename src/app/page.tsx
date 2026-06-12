@@ -189,6 +189,10 @@ export default function Home() {
   const [activeAsset, setActiveAsset] = useState<string | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<boolean>(false);
   
+  // Lazy tab loading states
+  const [loadedTabs, setLoadedTabs] = useState<Record<string, boolean>>({});
+  const [lazyLoadingTab, setLazyLoadingTab] = useState<string | null>(null);
+  
   // Audio extraction simulation states
   const [isExtractingAudio, setIsExtractingAudio] = useState(false);
   const [extractionProgress, setExtractionProgress] = useState(0);
@@ -385,6 +389,58 @@ export default function Home() {
       }
     };
   }, [isLoading]);
+
+  // Fetch lazy loaded assets data on-demand
+  const fetchLazyData = async (scanType: 'intel' | 'lighthouse' | 'ai-research' | 'ai-writer') => {
+    if (!result) return;
+    setLazyLoadingTab(activeAsset);
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: result.url, scanType }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setResult(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            ...data
+          };
+        });
+        setLoadedTabs(prev => ({ ...prev, [scanType]: true }));
+      } else {
+        console.error('Failed to load lazy data:', data.error);
+      }
+    } catch (err) {
+      console.error('Lazy loading error:', err);
+    } finally {
+      setLazyLoadingTab(null);
+    }
+  };
+
+  // Trigger lazy loading when switching to tabs that require heavy APIs
+  useEffect(() => {
+    if (!result || !activeAsset) return;
+
+    if (activeAsset === 'link-intel' && !loadedTabs['intel']) {
+      fetchLazyData('intel');
+    } else if (activeAsset === 'lighthouse' && !loadedTabs['lighthouse']) {
+      fetchLazyData('lighthouse');
+    } else if (activeAsset === 'ai-research' && !loadedTabs['ai-research']) {
+      fetchLazyData('ai-research');
+    } else if (activeAsset === 'ai-tools' && !loadedTabs['ai-writer']) {
+      fetchLazyData('ai-writer');
+    }
+  }, [activeAsset, result?.url, loadedTabs]);
+
+  // Reset scroll to top of window when activeAsset changes
+  useEffect(() => {
+    if (activeAsset) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [activeAsset]);
 
   // Cycle idle input placeholders with smooth opacity transitions
   useEffect(() => {
@@ -639,6 +695,8 @@ export default function Home() {
     setOcrText(null);
     setScreenshotData({});
     setRemovedBgImageUrl(null);
+    setLoadedTabs({});
+    setLazyLoadingTab(null);
     if (extractionIntervalRef.current) {
       clearInterval(extractionIntervalRef.current);
       extractionIntervalRef.current = null;
@@ -656,7 +714,7 @@ export default function Home() {
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: targetUrl }),
+        body: JSON.stringify({ url: targetUrl, scanType: 'base' }),
       });
       
       const data = await response.json();
@@ -998,9 +1056,7 @@ export default function Home() {
       list.push({ id: 'lighthouse', label: 'Lighthouse Audits' });
       list.push({ id: 'screenshots', label: 'Screenshots' });
       list.push({ id: 'og-preview', label: 'Social Previews' });
-      if (result.geminiResearch) {
-        list.push({ id: 'ai-research', label: 'AI Research' });
-      }
+      list.push({ id: 'ai-research', label: 'AI Research' });
     }
 
     // AI suggestion tags
@@ -1961,60 +2017,75 @@ export default function Home() {
                 )}
 
                 {/* 5A. LIGHTHOUSE TAB */}
-                {activeAsset === 'lighthouse' && result.lighthouseAudit && (
+                {/* 5A. LIGHTHOUSE TAB */}
+                {activeAsset === 'lighthouse' && (
                   <div className="space-y-4 animate-slide-up-in">
                     <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
                       <Sparkles size={11} className="text-violet-500" />
                       Lighthouse Performance & SEO Audits
                     </span>
 
-                    {/* Circular Score Gauges */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      <LighthouseScoreCircle score={result.lighthouseAudit.performance.score} label="Performance" />
-                      <LighthouseScoreCircle score={result.lighthouseAudit.accessibility.score} label="Accessibility" />
-                      <LighthouseScoreCircle score={result.lighthouseAudit.bestPractices.score} label="Best Practices" />
-                      <LighthouseScoreCircle score={result.lighthouseAudit.seo.score} label="SEO" />
-                    </div>
+                    {lazyLoadingTab === 'lighthouse' ? (
+                      <div className="py-20 flex flex-col items-center justify-center gap-3 text-center">
+                        <Loader2 size={36} className="text-violet-600 animate-spin" />
+                        <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider text-zinc-850">Running Lighthouse Audits...</span>
+                        <p className="text-[11px] text-zinc-400 font-light max-w-xs mx-auto">Analyzing page weight, DOM elements, response compression, and SEO tags...</p>
+                      </div>
+                    ) : result.lighthouseAudit ? (
+                      <>
+                        {/* Circular Score Gauges */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          <LighthouseScoreCircle score={result.lighthouseAudit.performance.score} label="Performance" />
+                          <LighthouseScoreCircle score={result.lighthouseAudit.accessibility.score} label="Accessibility" />
+                          <LighthouseScoreCircle score={result.lighthouseAudit.bestPractices.score} label="Best Practices" />
+                          <LighthouseScoreCircle score={result.lighthouseAudit.seo.score} label="SEO" />
+                        </div>
 
-                    {/* Collapsible/Categorized Audit Checklists */}
-                    <div className="mt-6 space-y-4">
-                      {['performance', 'accessibility', 'bestPractices', 'seo'].map((catKey) => {
-                        const category = result.lighthouseAudit?.[catKey as keyof typeof result.lighthouseAudit];
-                        if (!category) return null;
-                        
-                        const catLabel = catKey === 'bestPractices' ? 'Best Practices' : 
-                                         catKey === 'seo' ? 'SEO' : 
-                                         catKey.charAt(0).toUpperCase() + catKey.slice(1);
+                        {/* Collapsible/Categorized Audit Checklists */}
+                        <div className="mt-6 space-y-4">
+                          {['performance', 'accessibility', 'bestPractices', 'seo'].map((catKey) => {
+                            const category = result.lighthouseAudit?.[catKey as keyof typeof result.lighthouseAudit];
+                            if (!category) return null;
+                            
+                            const catLabel = catKey === 'bestPractices' ? 'Best Practices' : 
+                                             catKey === 'seo' ? 'SEO' : 
+                                             catKey.charAt(0).toUpperCase() + catKey.slice(1);
 
-                        return (
-                          <div key={catKey} className="border border-zinc-100 rounded-xl overflow-hidden bg-white shadow-sm">
-                            <div className="bg-zinc-50/50 px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between">
-                              <span className="text-xs font-bold text-zinc-700 tracking-wide">{catLabel} Rules Checklist</span>
-                              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
-                                category.score >= 90 ? 'bg-emerald-100 text-emerald-800' : 
-                                category.score >= 50 ? 'bg-amber-100 text-amber-800' : 
-                                'bg-rose-100 text-rose-800'
-                              }`}>{category.score}/100</span>
-                            </div>
-                            <div className="divide-y divide-zinc-100">
-                              {category.items.map((item, i) => (
-                                <div key={i} className="px-4 py-2.5 flex items-start gap-2.5 text-xs">
-                                  {item.passed ? (
-                                    <CheckCircle size={15} className="text-emerald-500 mt-0.5 shrink-0" />
-                                  ) : (
-                                    <XCircle size={15} className="text-rose-500 mt-0.5 shrink-0" />
-                                  )}
-                                  <div>
-                                    <span className="font-semibold text-zinc-800 block leading-normal">{item.name}</span>
-                                    <span className="text-[10px] text-zinc-400 font-light block mt-0.5">{item.detail}</span>
-                                  </div>
+                            return (
+                              <div key={catKey} className="border border-zinc-100 rounded-xl overflow-hidden bg-white shadow-sm">
+                                <div className="bg-zinc-50/50 px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between">
+                                  <span className="text-xs font-bold text-zinc-700 tracking-wide">{catLabel} Rules Checklist</span>
+                                  <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                                    category.score >= 90 ? 'bg-emerald-100 text-emerald-800' : 
+                                    category.score >= 50 ? 'bg-amber-100 text-amber-800' : 
+                                    'bg-rose-100 text-rose-800'
+                                  }`}>{category.score}/100</span>
                                 </div>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                                <div className="divide-y divide-zinc-100">
+                                  {category.items.map((item, i) => (
+                                    <div key={i} className="px-4 py-2.5 flex items-start gap-2.5 text-xs">
+                                      {item.passed ? (
+                                        <CheckCircle size={15} className="text-emerald-500 mt-0.5 shrink-0" />
+                                      ) : (
+                                        <XCircle size={15} className="text-rose-500 mt-0.5 shrink-0" />
+                                      )}
+                                      <div>
+                                        <span className="font-semibold text-zinc-800 block leading-normal">{item.name}</span>
+                                        <span className="text-[10px] text-zinc-400 font-light block mt-0.5">{item.detail}</span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="py-20 flex flex-col items-center justify-center text-center text-zinc-400 text-xs font-light">
+                        Lighthouse audits failed or are not available for this site.
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2179,65 +2250,79 @@ export default function Home() {
                 )}
 
                 {/* 5D. AI RESEARCH TAB */}
-                {activeAsset === 'ai-research' && result.geminiResearch && (
+                {/* 5D. AI RESEARCH TAB */}
+                {activeAsset === 'ai-research' && (
                   <div className="space-y-4 animate-slide-up-in">
                     <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
                       <Sparkles size={11} className="text-violet-500" />
                       Gemini Deep Webpage Intelligence
                     </span>
 
-                    {/* Executive Summary */}
-                    <div className="bg-zinc-50/50 border border-zinc-100 p-4 rounded-xl space-y-1">
-                      <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold block animate-fade-in">Executive Summary</span>
-                      <p className="text-xs text-zinc-700 leading-relaxed font-light select-text">
-                        {result.geminiResearch.summary}
-                      </p>
-                    </div>
-
-                    {/* Target Audience */}
-                    <div className="bg-zinc-50/50 border border-zinc-100 p-4 rounded-xl space-y-1">
-                      <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold block">Target Audience Profile</span>
-                      <p className="text-xs text-zinc-700 leading-relaxed font-light select-text">
-                        {result.geminiResearch.targetAudience}
-                      </p>
-                    </div>
-
-                    {/* Key Competitors */}
-                    {result.geminiResearch.competitors && result.geminiResearch.competitors.length > 0 && (
-                      <div className="space-y-2">
-                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">Identified Direct Competitors</span>
-                        <div className="flex flex-wrap gap-2">
-                          {result.geminiResearch.competitors.map((comp, idx) => (
-                            <a 
-                              key={idx} 
-                              href={`https://${comp.replace(/https?:\/\//i, '')}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-3 py-1.5 bg-violet-50 hover:bg-violet-100 border border-violet-100 text-violet-700 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm"
-                            >
-                              <span>{comp}</span>
-                              <ExternalLink size={10} className="opacity-60" />
-                            </a>
-                          ))}
-                        </div>
+                    {lazyLoadingTab === 'ai-research' ? (
+                      <div className="py-20 flex flex-col items-center justify-center gap-3 text-center">
+                        <Loader2 size={36} className="text-violet-600 animate-spin" />
+                        <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider text-zinc-850">Generating AI Web Intelligence...</span>
+                        <p className="text-[11px] text-zinc-400 font-light max-w-xs mx-auto">Analyzing website content to extract competitors, target audience, and actionable SEO advice...</p>
                       </div>
-                    )}
+                    ) : result.geminiResearch ? (
+                      <>
+                        {/* Executive Summary */}
+                        <div className="bg-zinc-50/50 border border-zinc-100 p-4 rounded-xl space-y-1">
+                          <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold block animate-fade-in">Executive Summary</span>
+                          <p className="text-xs text-zinc-700 leading-relaxed font-light select-text">
+                            {result.geminiResearch.summary}
+                          </p>
+                        </div>
 
-                    {/* Actionable SEO Advice */}
-                    {result.geminiResearch.seoAdvice && result.geminiResearch.seoAdvice.length > 0 && (
-                      <div className="space-y-2">
-                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">Actionable SEO Enhancements</span>
-                        <div className="space-y-2">
-                          {result.geminiResearch.seoAdvice.map((advice, idx) => (
-                            <div key={idx} className="flex items-start gap-2.5 text-xs text-zinc-650 bg-white border border-zinc-100 p-3 rounded-xl shadow-sm">
-                              <span className="w-5 h-5 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center font-bold text-[10px] shrink-0">{idx + 1}</span>
-                              <p className="flex-1 font-light leading-relaxed select-text">{advice}</p>
+                        {/* Target Audience */}
+                        <div className="bg-zinc-50/50 border border-zinc-100 p-4 rounded-xl space-y-1">
+                          <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold block">Target Audience Profile</span>
+                          <p className="text-xs text-zinc-700 leading-relaxed font-light select-text">
+                            {result.geminiResearch.targetAudience}
+                          </p>
+                        </div>
+
+                        {/* Key Competitors */}
+                        {result.geminiResearch.competitors && result.geminiResearch.competitors.length > 0 && (
+                          <div className="space-y-2">
+                            <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">Identified Direct Competitors</span>
+                            <div className="flex flex-wrap gap-2">
+                              {result.geminiResearch.competitors.map((comp, idx) => (
+                                <a 
+                                  key={idx} 
+                                  href={`https://${comp.replace(/https?:\/\//i, '')}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-3 py-1.5 bg-violet-50 hover:bg-violet-100 border border-violet-100 text-violet-700 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm"
+                                >
+                                  <span>{comp}</span>
+                                  <ExternalLink size={10} className="opacity-60" />
+                                </a>
+                              ))}
                             </div>
-                          ))}
-                        </div>
+                          </div>
+                        )}
+
+                        {/* Actionable SEO Advice */}
+                        {result.geminiResearch.seoAdvice && result.geminiResearch.seoAdvice.length > 0 && (
+                          <div className="space-y-2">
+                            <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">Actionable SEO Enhancements</span>
+                            <div className="space-y-2">
+                              {result.geminiResearch.seoAdvice.map((advice, idx) => (
+                                <div key={idx} className="flex items-start gap-2.5 text-xs text-zinc-650 bg-white border border-zinc-100 p-3 rounded-xl shadow-sm">
+                                  <span className="w-5 h-5 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center font-bold text-[10px] shrink-0">{idx + 1}</span>
+                                  <p className="flex-1 font-light leading-relaxed select-text">{advice}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="py-20 flex flex-col items-center justify-center text-center text-zinc-400 text-xs font-light">
+                        AI website research details failed or are not available for this site.
                       </div>
                     )}
-
                   </div>
                 )}
 
@@ -2245,6 +2330,14 @@ export default function Home() {
                 {/* 6. LINK INTELLIGENCE DETAILS TAB (Always Available) */}
                 {activeAsset === 'link-intel' && result.linkIntel && (
                   <div className="space-y-4 animate-slide-up-in">
+                    {lazyLoadingTab === 'link-intel' ? (
+                      <div className="py-20 flex flex-col items-center justify-center gap-3 text-center">
+                        <Loader2 size={36} className="text-violet-600 animate-spin" />
+                        <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider text-zinc-850">Loading Link Intelligence...</span>
+                        <p className="text-[11px] text-zinc-400 font-light max-w-xs mx-auto">Fetching safety checks, WHOIS registry, DNS records, and IP geolocation details...</p>
+                      </div>
+                    ) : (
+                      <>
 
                     {/* VirusTotal Safety Scan */}
                     {result.linkIntel.virusTotal ? (
@@ -2548,104 +2641,115 @@ export default function Home() {
                       </div>
                     )}
 
+                      </>
+                    )}
                   </div>
                 )}
 
                 {/* 7. AI CREATOR TOOLS TAB (Always Available) */}
-                {activeAsset === 'ai-tools' && result.aiSuggestions && (
+                {activeAsset === 'ai-tools' && (
                   <div className="space-y-4.5 animate-slide-up-in">
                     
-                    {/* Catchy captions */}
-                    <div className="space-y-2">
-                      <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
-                        <Sparkles size={11} className="text-violet-500" />
-                        AI Creative Social Captions
-                      </span>
-                      <div className="space-y-2">
-                        {result.aiSuggestions.captions.map((cap, i) => (
-                          <div key={i} className="flex items-start gap-2 bg-zinc-50 border border-zinc-100 p-3 rounded-xl">
-                            <p className="text-xs text-zinc-600 leading-relaxed flex-1 font-light select-text">{cap}</p>
-                            <button
-                              onClick={() => handleCopyText(cap, `cap-${i}`)}
-                              className="p-1.5 bg-white border border-zinc-200/50 hover:bg-zinc-100 rounded-lg text-zinc-400 hover:text-zinc-700 cursor-pointer transition-all shrink-0"
-                              title="Copy caption"
-                            >
-                              {copiedText[`cap-${i}`] ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
-                            </button>
-                          </div>
-                        ))}
+                    {lazyLoadingTab === 'ai-tools' ? (
+                      <div className="py-20 flex flex-col items-center justify-center gap-3 text-center">
+                        <Loader2 size={36} className="text-violet-600 animate-spin" />
+                        <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider text-zinc-850">Generating AI Suggestions...</span>
+                        <p className="text-[11px] text-zinc-400 font-light max-w-xs mx-auto">Crafting viral titles, engaging captions, optimized meta tags, and trending hashtags...</p>
                       </div>
-                    </div>
-
-                    {/* Catchy optimized titles */}
-                    <div className="space-y-2">
-                      <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
-                        <Sparkles size={11} className="text-violet-500" />
-                        Video / Post Title Optimizers
-                      </span>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        {result.aiSuggestions.optimizedTitles.map((titleText, i) => (
-                          <div key={i} className="bg-zinc-50 border border-zinc-100 p-3 rounded-xl flex flex-col justify-between gap-2.5">
-                            <span className="text-xs font-semibold text-zinc-700 leading-snug line-clamp-3 select-text">{titleText}</span>
-                            <button
-                              onClick={() => handleCopyText(titleText, `title-${i}`)}
-                              className="text-[10px] text-violet-600 hover:text-violet-700 font-bold flex items-center gap-1 cursor-pointer transition-all self-end"
-                            >
-                              {copiedText[`title-${i}`] ? <Check size={10} className="text-emerald-500" /> : <Copy size={10} />}
-                              {copiedText[`title-${i}`] ? 'Copied' : 'Copy'}
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* SEO Description */}
-                    <div className="space-y-2">
-                      <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
-                        <Sparkles size={11} className="text-violet-500" />
-                        Optimized SEO Meta Description
-                      </span>
-                      <div className="flex items-start gap-2 bg-zinc-50 border border-zinc-100 p-3 rounded-xl">
-                        <p className="text-xs text-zinc-500 leading-relaxed flex-1 select-text">{result.aiSuggestions.seoDescription}</p>
-                        <button
-                          onClick={() => handleCopyText(result.aiSuggestions!.seoDescription, 'seo-desc')}
-                          className="p-2 bg-white border border-zinc-200/50 hover:bg-zinc-100 rounded-lg text-zinc-400 hover:text-zinc-700 cursor-pointer transition-all shrink-0"
-                          title="Copy SEO description"
-                        >
-                          {copiedText['seo-desc'] ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Hashtags */}
-                    {(result.aiSuggestions.hashtags || result.hashtags) && (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
+                    ) : result.aiSuggestions ? (
+                      <>
+                        {/* Catchy captions */}
+                        <div className="space-y-2">
                           <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
                             <Sparkles size={11} className="text-violet-500" />
-                            Trending Hashtags
+                            AI Creative Social Captions
                           </span>
-                          <button
-                            onClick={() => handleCopyText((result.aiSuggestions!.hashtags || result.hashtags || []).join(' '), 'all-hashtags')}
-                            className="text-[9px] font-semibold text-violet-600 hover:text-violet-700 flex items-center gap-1 cursor-pointer"
-                          >
-                            {copiedText['all-hashtags'] ? <><Check size={9} className="text-emerald-500" /> Copied All!</> : <><Copy size={9} /> Copy All</>}
-                          </button>
+                          <div className="space-y-2">
+                            {(result.aiSuggestions?.captions || []).map((cap, i) => (
+                              <div key={i} className="flex items-start gap-2 bg-zinc-50 border border-zinc-100 p-3 rounded-xl">
+                                <p className="text-xs text-zinc-600 leading-relaxed flex-1 font-light select-text">{cap}</p>
+                                <button
+                                  onClick={() => handleCopyText(cap, `cap-${i}`)}
+                                  className="p-1.5 bg-white border border-zinc-200/50 hover:bg-zinc-100 rounded-lg text-zinc-400 hover:text-zinc-700 cursor-pointer transition-all shrink-0"
+                                  title="Copy caption"
+                                >
+                                  {copiedText[`cap-${i}`] ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {(result.aiSuggestions.hashtags || result.hashtags || []).map((tag, i) => (
-                            <button
-                              key={i}
-                              onClick={() => handleCopyText(tag, `tag-${i}`)}
-                              className={`px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all cursor-pointer ${copiedText[`tag-${i}`] ? 'bg-emerald-100 border border-emerald-200 text-emerald-700' : 'bg-violet-50 border border-violet-100 text-violet-700 hover:bg-violet-100'}`}
-                            >
-                              {copiedText[`tag-${i}`] ? '✓ ' : ''}{tag}
-                            </button>
-                          ))}
-                        </div>
+
+                        {/* Optimized Titles */}
+                        {result.aiSuggestions?.optimizedTitles && result.aiSuggestions.optimizedTitles.length > 0 && (
+                          <div className="space-y-2 mt-4">
+                            <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                              <Sparkles size={11} className="text-violet-500" />
+                              Optimized Video/Page Titles
+                            </span>
+                            <div className="space-y-2">
+                              {(result.aiSuggestions?.optimizedTitles || []).map((titleText, i) => (
+                                <div key={i} className="flex items-center justify-between gap-2 bg-zinc-50 border border-zinc-100 px-4 py-2.5 rounded-xl">
+                                  <span className="text-xs text-zinc-700 font-semibold leading-normal flex-1 select-text">{titleText}</span>
+                                  <button
+                                    onClick={() => handleCopyText(titleText, `title-${i}`)}
+                                    className="p-1.5 bg-white border border-zinc-200/50 hover:bg-zinc-100 rounded-lg text-zinc-400 hover:text-zinc-700 cursor-pointer transition-all shrink-0"
+                                    title="Copy title"
+                                  >
+                                    {copiedText[`title-${i}`] ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* SEO Description */}
+                        {result.aiSuggestions?.seoDescription && (
+                          <div className="space-y-2 mt-4">
+                            <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                              <Sparkles size={11} className="text-violet-500" />
+                              AI Crafted Meta Description
+                            </span>
+                            <div className="flex items-start gap-2 bg-zinc-50 border border-zinc-100 p-3 rounded-xl">
+                              <p className="text-xs text-zinc-650 leading-relaxed flex-1 font-light select-text">{result.aiSuggestions?.seoDescription}</p>
+                              <button
+                                onClick={() => handleCopyText(result.aiSuggestions?.seoDescription || '', 'seo-desc')}
+                                className="p-1.5 bg-white border border-zinc-200/50 hover:bg-zinc-100 rounded-lg text-zinc-400 hover:text-zinc-700 cursor-pointer transition-all shrink-0"
+                                title="Copy meta description"
+                              >
+                                {copiedText['seo-desc'] ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* AI suggest hashtags */}
+                        {(result.aiSuggestions?.hashtags || result.hashtags || []).length > 0 && (
+                          <div className="space-y-2 mt-4">
+                            <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                              <Sparkles size={11} className="text-violet-500" />
+                              AI Suggested Hashtags
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {(result.aiSuggestions?.hashtags || result.hashtags || []).map((tag, i) => (
+                                <button
+                                  key={i}
+                                  onClick={() => handleCopyText(tag, `tag-${i}`)}
+                                  className={`px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all cursor-pointer ${copiedText[`tag-${i}`] ? 'bg-emerald-100 border border-emerald-200 text-emerald-700' : 'bg-violet-50 border border-violet-100 text-violet-700 hover:bg-violet-100'}`}
+                                >
+                                  {copiedText[`tag-${i}`] ? '✓ ' : ''}{tag}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="py-20 flex flex-col items-center justify-center text-center text-zinc-400 text-xs font-light">
+                        AI content suggestions are not available for this link.
                       </div>
                     )}
-
                   </div>
                 )}
 
