@@ -567,20 +567,23 @@ export default function Home() {
   // Set default active asset on success
   useEffect(() => {
     if (result) {
-      // Determine default asset type
-      if (result.contentType === 'video' || result.embedUrl) {
-        setActiveAsset('video');
-      } else if (result.contentType === 'image' || result.previewUrl) {
-        setActiveAsset('image');
-      } else if (result.contentType === 'audio') {
-        setActiveAsset('audio');
-      } else {
-        setActiveAsset('website');
+      // Only set default if activeAsset is not already selected/set
+      if (!activeAsset) {
+        // Determine default asset type
+        if (result.contentType === 'video' || result.embedUrl) {
+          setActiveAsset('video');
+        } else if (result.contentType === 'image' || result.previewUrl) {
+          setActiveAsset('image');
+        } else if (result.contentType === 'audio') {
+          setActiveAsset('audio');
+        } else {
+          setActiveAsset('website');
+        }
       }
     } else {
       setActiveAsset(null);
     }
-  }, [result]);
+  }, [result, activeAsset]);
 
   // Render QR Code onto canvas when matching asset selected
   useEffect(() => {
