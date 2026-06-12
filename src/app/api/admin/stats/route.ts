@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { cookies } from 'next/headers';
 import { connectToDatabase } from '@/lib/db';
 import ApiUsageLog from '@/models/ApiUsageLog';
+import Feedback from '@/models/Feedback';
 
 async function verifyAdmin() {
   const cookieStore = await cookies();
@@ -112,6 +113,11 @@ export async function GET(request: NextRequest) {
     const totalLogs = await ApiUsageLog.countDocuments(query);
     const totalPages = Math.ceil(totalLogs / limit);
 
+    // Fetch feedbacks (limit to 50 for admin view)
+    const feedbacks = await Feedback.find({})
+      .sort({ timestamp: -1 })
+      .limit(50);
+
     return NextResponse.json({
       success: true,
       metrics: {
@@ -124,6 +130,7 @@ export async function GET(request: NextRequest) {
       apiKeysStatus,
       apiUsageStats,
       logs,
+      feedbacks,
       pagination: {
         page,
         limit,

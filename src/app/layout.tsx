@@ -16,13 +16,13 @@ export const metadata: Metadata = {
   title: "EnterURL - Advanced Link & Website Intelligence Analyzer",
   description: "Analyze any link, scrape media, inspect SSL certificates, scan tech stacks, generate screenshots, and run SEO audits instantly on enterurl.vercel.app.",
   metadataBase: new URL('https://enterurl.vercel.app'),
-  keywords: ["link analyzer", "website intelligence", "media downloader", "SSL checker", "technology scanner", "SEO audit", "URL preview", "VirusTotal scan"],
-  authors: [{ name: "EnterURL Team" }],
+  keywords: ["link analyzer", "website intelligence", "media downloader", "SSL checker", "technology scanner", "SEO audit", "URL preview", "VirusTotal scan", "apnashashank developer"],
+  authors: [{ name: "apnashashank developer" }],
   icons: {
     icon: [
-      { url: "/icon.png", type: "image/png" }
+      { url: "https://ik.imagekit.io/DEMOPROJECT/iconenterurl.png", type: "image/png" }
     ],
-    apple: "/icon.png",
+    apple: "https://ik.imagekit.io/DEMOPROJECT/iconenterurl.png",
   },
   openGraph: {
     title: "EnterURL - Advanced Link & Website Intelligence Analyzer",
@@ -31,7 +31,7 @@ export const metadata: Metadata = {
     siteName: "EnterURL",
     images: [
       {
-        url: "/icon.png",
+        url: "https://ik.imagekit.io/DEMOPROJECT/iconenterurl.png",
         width: 512,
         height: 512,
         alt: "EnterURL Logo",
@@ -44,7 +44,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "EnterURL - Advanced Link & Website Intelligence Analyzer",
     description: "Analyze any link, inspect SSL certificates, scan tech stacks, and generate screenshots instantly.",
-    images: ["/icon.png"],
+    images: ["https://ik.imagekit.io/DEMOPROJECT/iconenterurl.png"],
   },
 };
 

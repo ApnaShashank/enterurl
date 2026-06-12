@@ -31,7 +31,8 @@ import {
   Eraser,
   CheckCircle,
   XCircle,
-  AlertTriangle
+  AlertTriangle,
+  FileText
 } from 'lucide-react';
 import exifr from 'exifr';
 import QRCode from 'qrcode';
@@ -134,6 +135,18 @@ interface AnalysisResult {
     tags: string[];
     faces: number;
   };
+  developerSpecs?: {
+    colors: string[];
+    fonts: string[];
+    designTokens: Array<{ name: string; value: string }>;
+    assets: {
+      images: string[];
+      stylesheets: string[];
+      scripts: string[];
+      media: string[];
+      favicons: string[];
+    };
+  };
 }
 
 const LighthouseScoreCircle = ({ score, label }: { score: number; label: string }) => {
@@ -231,6 +244,11 @@ export default function Home() {
   const [transcriptionLanguage, setTranscriptionLanguage] = useState<string | null>(null);
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
 
+  // Feedback states
+  const [feedbackText, setFeedbackText] = useState('');
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+
   // Advanced Web & Media Tool States
   const [screenshotDevice, setScreenshotDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [screenshotLoading, setScreenshotLoading] = useState(false);
@@ -240,6 +258,15 @@ export default function Home() {
   const [ocrProgress, setOcrProgress] = useState<number | null>(null);
   const [ocrStatus, setOcrStatus] = useState('');
   const [ocrText, setOcrText] = useState<string | null>(null);
+  const [isDownloadingSubtitles, setIsDownloadingSubtitles] = useState(false);
+  const [devSpecsSearch, setDevSpecsSearch] = useState('');
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
+    images: false,
+    favicons: true,
+    stylesheets: true,
+    scripts: true,
+    media: true
+  });
 
   // Rolling platforms simulation
   const [rollingIndex, setRollingIndex] = useState(0);
@@ -633,6 +660,8 @@ export default function Home() {
     setOcrText(null);
     setScreenshotData({});
     setRemovedBgImageUrl(null);
+    setFeedbackText('');
+    setFeedbackSubmitted(false);
     if (extractionIntervalRef.current) {
       clearInterval(extractionIntervalRef.current);
       extractionIntervalRef.current = null;
@@ -640,6 +669,32 @@ export default function Home() {
     if (audioDownloadIntervalRef.current) {
       clearInterval(audioDownloadIntervalRef.current);
       audioDownloadIntervalRef.current = null;
+    }
+  };
+
+  const handleSubmitFeedback = async (errorMsg: string, sourceArea: string) => {
+    setIsSubmittingFeedback(true);
+    try {
+      const res = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: inputUrl,
+          errorMessage: errorMsg,
+          feedbackText: `${sourceArea}: ${feedbackText}`
+        })
+      });
+      if (res.ok) {
+        setFeedbackSubmitted(true);
+        setFeedbackText('');
+      } else {
+        alert('Could not submit feedback to database. You can still use the mail option!');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error. Please use the mail option!');
+    } finally {
+      setIsSubmittingFeedback(false);
     }
   };
 
@@ -681,6 +736,8 @@ export default function Home() {
     setIsLoading(true);
     setError(null);
     setResult(null);
+    setFeedbackText('');
+    setFeedbackSubmitted(false);
 
     // Reset animation phase states
     setIsPlatformMatched(false);
@@ -748,6 +805,36 @@ export default function Home() {
     const downloadFilename = title ? title.replace(/[^a-z0-9]/gi, '_').toLowerCase() : 'download';
     const proxyUrl = `/api/download?url=${encodeURIComponent(mediaUrl)}&filename=${encodeURIComponent(downloadFilename)}`;
     window.open(proxyUrl, '_blank');
+  };
+
+  const handleDownloadSubtitles = async () => {
+    if (!result || !result.url) return;
+    setIsDownloadingSubtitles(true);
+    try {
+      const res = await fetch(`/api/subtitles?url=${encodeURIComponent(result.url)}`);
+      const data = await res.json();
+      if (!data.success || !data.srt) {
+        throw new Error(data.error || 'Failed to download subtitles.');
+      }
+      
+      const blob = new Blob([data.srt], { type: 'text/srt' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const downloadFilename = (data.title || result.title || 'subtitles')
+        .replace(/[^a-z0-9]/gi, '_')
+        .toLowerCase();
+      a.download = `${downloadFilename}.srt`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Error occurred while downloading subtitles.');
+    } finally {
+      setIsDownloadingSubtitles(false);
+    }
   };
 
   const handleRealVideoDownload = async (
@@ -957,9 +1044,24 @@ export default function Home() {
         body: JSON.stringify({ audioUrl }),
       });
       const submitData = await submitRes.json();
-      if (!submitData.success || !submitData.transcriptId) {
+      if (!submitData.success) {
         throw new Error(submitData.error || 'Failed to submit audio');
       }
+
+      // If Deepgram resolved it synchronously
+      if (submitData.status === 'completed') {
+        setIsTranscribing(false);
+        setTranscriptionText(submitData.text || 'No speech detected in audio');
+        setTranscriptionWords(submitData.words || null);
+        setTranscriptionConfidence(submitData.confidence);
+        setTranscriptionLanguage(submitData.language || 'en');
+        return;
+      }
+
+      if (!submitData.transcriptId) {
+        throw new Error('No transcript ID returned for async polling.');
+      }
+
       setTranscriptionId(submitData.transcriptId);
       setTranscriptionStatus('Processing audio... This may take 30–90 seconds.');
 
@@ -983,10 +1085,10 @@ export default function Home() {
             clearInterval(transcribePollingRef.current!);
             setIsTranscribing(false);
             setTranscriptionError(pollData.error || 'Transcription failed');
-          } else if (attempts > 25) { // ~100 seconds timeout
+          } else if (attempts > 150) { // ~600 seconds timeout (10 minutes)
             clearInterval(transcribePollingRef.current!);
             setIsTranscribing(false);
-            setTranscriptionError('Transcription timed out. Try with a shorter audio clip.');
+            setTranscriptionError('Transcription timed out. The video is long, but it might still be processing. Try checking later.');
           }
         } catch (pollErr: any) {
           console.error('Polling error:', pollErr);
@@ -1082,6 +1184,9 @@ export default function Home() {
       list.push({ id: 'screenshots', label: 'Screenshots' });
       list.push({ id: 'og-preview', label: 'Social Previews' });
       list.push({ id: 'ai-research', label: 'AI Research' });
+      if (result.developerSpecs) {
+        list.push({ id: 'dev-specs', label: 'Developer Specs' });
+      }
     }
 
     // AI suggestion tags
@@ -1418,23 +1523,53 @@ export default function Home() {
 
         {/* Error Feedback message */}
         {error && (
-          <div className="w-full mt-4 text-left border border-red-100 bg-red-50/50 p-4 rounded-xl flex items-start gap-3 animate-fade-in">
-            <AlertCircle size={18} className="text-red-500 shrink-0 mt-0.5" />
-            <div className="text-xs text-red-600 font-light">
-              <span className="font-semibold block mb-0.5">Scanning Error</span>
-              {error}
+          <div className="w-full mt-4 text-left border border-red-155 bg-red-50/70 p-4 rounded-xl flex flex-col gap-3.5 animate-fade-in shadow-sm select-text">
+            <div className="flex items-start gap-3">
+              <AlertCircle size={18} className="text-red-500 shrink-0 mt-0.5" />
+              <div className="text-xs text-red-655 font-light flex-1">
+                <span className="font-semibold block mb-0.5 text-red-800 text-sm">Sorry, this time some technical issue</span>
+                <span className="opacity-95 font-mono text-[10px] bg-red-100/50 px-2 py-1.5 rounded block mt-1 break-all border border-red-200/40 select-all">{error}</span>
+              </div>
+            </div>
+
+            {/* General Feedback Box */}
+            <div className="border-t border-red-100/60 pt-3.5 flex flex-col gap-2">
+              <span className="text-[10px] text-red-650 font-semibold uppercase tracking-wider block">Report this issue to the developer</span>
+              {feedbackSubmitted ? (
+                <div className="text-xs text-emerald-600 font-semibold flex items-center gap-1.5 py-1">
+                  <Check size={14} className="text-emerald-500" />
+                  <span>Thank you! Your feedback has been sent to the developer.</span>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <textarea
+                    value={feedbackText}
+                    onChange={(e) => setFeedbackText(e.target.value)}
+                    placeholder="Describe what you were trying to do or add custom notes..."
+                    className="w-full min-h-[60px] p-2.5 text-xs bg-white border border-red-250 rounded-xl text-zinc-800 focus:outline-none focus:ring-1 focus:ring-red-400 placeholder:text-zinc-400 font-light"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleSubmitFeedback(error || 'Unknown Error', 'Scan Error')}
+                      disabled={isSubmittingFeedback || !feedbackText.trim()}
+                      className="px-3.5 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-medium rounded-lg text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                    >
+                      {isSubmittingFeedback ? <Loader2 size={12} className="animate-spin" /> : null}
+                      <span>Submit Feedback</span>
+                    </button>
+                    <a
+                      href={`mailto:shashank8808108802@gmail.com?subject=EnterURL Error Report&body=Hi Shashank,%0D%0A%0D%0AI encountered an error on EnterURL.%0D%0A%0D%0AURL scanned: ${encodeURIComponent(inputUrl)}%0D%0AError message: ${encodeURIComponent(error || '')}%0D%0A%0D%0AUser comments: ${encodeURIComponent(feedbackText)}`}
+                      className="px-3.5 py-2 bg-white hover:bg-red-50 border border-red-200 text-red-700 font-medium rounded-lg text-xs transition-all flex items-center gap-1 shadow-sm"
+                    >
+                      <span>Open Mail Client</span>
+                    </a>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Connection Line: Draws down dynamically when active asset changes */}
-        {showConnectionLine && result && activeAsset && (
-          <div key={activeAsset} className="draw-line-wrapper">
-            <div className="draw-line-path"></div>
-          </div>
-        )}
-
-        {/* CONTENT PREVIEW: Rendered dynamically based on selected active asset */}
         {showPreviewCard && result && activeAsset && (
           <div className="w-full text-left animate-fade-in z-20">
             <div className="custom-card rounded-2xl overflow-hidden border border-zinc-100 bg-white/95 shadow-lg">
@@ -1545,6 +1680,21 @@ export default function Home() {
                         )}
 
                         {/* Extra youtube/tiktok button */}
+                        {result.platform === 'youtube' && (
+                          <button
+                            onClick={handleDownloadSubtitles}
+                            disabled={isDownloadingSubtitles}
+                            className="w-full py-3 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-zinc-200/40 disabled:opacity-50"
+                          >
+                            {isDownloadingSubtitles ? (
+                              <Loader2 size={13} className="animate-spin text-zinc-650" />
+                            ) : (
+                              <FileText size={13} className="text-zinc-600" />
+                            )}
+                            <span>Download Subtitles (.srt)</span>
+                          </button>
+                        )}
+
                         {result.previewUrl && (
                           <button
                             onClick={() => handleDownload(result.previewUrl!, result.title + '_thumbnail')}
@@ -1843,11 +1993,54 @@ export default function Home() {
                               </button>
                             </div>
                           ) : transcriptionError ? (
-                            <div className="space-y-2">
-                              <p className="text-xs text-rose-600 bg-rose-50 border border-rose-100 p-3 rounded-xl">{transcriptionError}</p>
+                            <div className="space-y-3.5 border border-rose-100 bg-rose-50/40 p-4 rounded-xl select-text">
+                              <div className="flex items-start gap-2.5">
+                                <AlertCircle size={16} className="text-rose-500 shrink-0 mt-0.5" />
+                                <div className="text-xs text-rose-655 font-light flex-1">
+                                  <span className="font-semibold block mb-0.5 text-rose-800 text-xs">Sorry, this time some technical issue</span>
+                                  <span className="opacity-95 font-mono text-[10px] bg-rose-100/50 px-1.5 py-1 rounded block mt-0.5 break-all select-all">{transcriptionError}</span>
+                                </div>
+                              </div>
+                              
+                              {/* Transcription Feedback form */}
+                              <div className="border-t border-rose-100/50 pt-3 flex flex-col gap-2">
+                                <span className="text-[10px] text-rose-500 font-semibold uppercase tracking-wider block">Report this transcription issue</span>
+                                {feedbackSubmitted ? (
+                                  <div className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1.5 py-0.5">
+                                    <Check size={12} className="text-emerald-500" />
+                                    <span>Sent to developer!</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col gap-2">
+                                    <textarea
+                                      value={feedbackText}
+                                      onChange={(e) => setFeedbackText(e.target.value)}
+                                      placeholder="Comment on what happened..."
+                                      className="w-full min-h-[50px] p-2 text-[11px] bg-white border border-rose-200 rounded-lg text-zinc-800 focus:outline-none focus:ring-1 focus:ring-rose-450 placeholder:text-zinc-400 font-light"
+                                    />
+                                    <div className="flex gap-1.5">
+                                      <button
+                                        onClick={() => handleSubmitFeedback(transcriptionError || 'Unknown Transcription Error', 'Transcription Error')}
+                                        disabled={isSubmittingFeedback || !feedbackText.trim()}
+                                        className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-medium rounded-md text-[10px] transition-all cursor-pointer flex items-center gap-1"
+                                      >
+                                        {isSubmittingFeedback ? <Loader2 size={10} className="animate-spin" /> : null}
+                                        <span>Send Report</span>
+                                      </button>
+                                      <a
+                                        href={`mailto:shashank8808108802@gmail.com?subject=EnterURL Transcription Error&body=Hi Shashank,%0D%0A%0D%0AI encountered a transcription error on EnterURL.%0D%0A%0D%0AURL: ${encodeURIComponent(inputUrl)}%0D%0AError: ${encodeURIComponent(transcriptionError || '')}%0D%0A%0D%0AComments: ${encodeURIComponent(feedbackText)}`}
+                                        className="px-2.5 py-1.5 bg-white hover:bg-rose-50 border border-rose-200 text-rose-700 font-medium rounded-md text-[10px] transition-all flex items-center gap-1"
+                                      >
+                                        <span>Mail Client</span>
+                                      </a>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
                               <button
-                                onClick={() => { setTranscriptionError(null); }}
-                                className="w-full py-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-650 rounded-xl text-xs font-semibold transition-all"
+                                onClick={() => { setTranscriptionError(null); setFeedbackSubmitted(false); setFeedbackText(''); }}
+                                className="w-full py-2 bg-white hover:bg-zinc-50 text-zinc-650 border border-zinc-200 rounded-lg text-xs font-semibold transition-all shadow-sm"
                               >
                                 Try Again
                               </button>
@@ -2058,7 +2251,58 @@ export default function Home() {
                           </div>
                         )}
                         {removeBgError && (
-                          <p className="text-xs text-rose-500 mt-2 bg-rose-50 border border-rose-100 p-2 rounded-xl">{removeBgError}</p>
+                          <div className="space-y-3 mt-2.5 border border-rose-100 bg-rose-50/40 p-4 rounded-xl select-text">
+                            <div className="flex items-start gap-2.5">
+                              <AlertCircle size={16} className="text-rose-500 shrink-0 mt-0.5" />
+                              <div className="text-xs text-rose-655 font-light flex-1">
+                                <span className="font-semibold block mb-0.5 text-rose-800 text-xs">Sorry, this time some technical issue</span>
+                                <span className="opacity-95 font-mono text-[10px] bg-rose-100/50 px-1.5 py-1 rounded block mt-0.5 break-all select-all">{removeBgError}</span>
+                              </div>
+                            </div>
+                            
+                            {/* Bg Removal Feedback form */}
+                            <div className="border-t border-rose-100/50 pt-3 flex flex-col gap-2">
+                              <span className="text-[10px] text-rose-500 font-semibold uppercase tracking-wider block">Report this bg removal issue</span>
+                              {feedbackSubmitted ? (
+                                <div className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1.5 py-0.5">
+                                  <Check size={12} className="text-emerald-500" />
+                                  <span>Sent to developer!</span>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col gap-2">
+                                  <textarea
+                                    value={feedbackText}
+                                    onChange={(e) => setFeedbackText(e.target.value)}
+                                    placeholder="Comment on what happened..."
+                                    className="w-full min-h-[50px] p-2 text-[11px] bg-white border border-rose-200 rounded-lg text-zinc-800 focus:outline-none focus:ring-1 focus:ring-rose-455 placeholder:text-zinc-400 font-light"
+                                  />
+                                  <div className="flex gap-1.5">
+                                    <button
+                                      onClick={() => handleSubmitFeedback(removeBgError || 'Unknown Bg Removal Error', 'Bg Removal Error')}
+                                      disabled={isSubmittingFeedback || !feedbackText.trim()}
+                                      className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-medium rounded-md text-[10px] transition-all cursor-pointer flex items-center gap-1"
+                                    >
+                                      {isSubmittingFeedback ? <Loader2 size={10} className="animate-spin" /> : null}
+                                      <span>Send Report</span>
+                                    </button>
+                                    <a
+                                      href={`mailto:shashank8808108802@gmail.com?subject=EnterURL Background Removal Error&body=Hi Shashank,%0D%0A%0D%0AI encountered a background removal error on EnterURL.%0D%0A%0D%0AURL: ${encodeURIComponent(inputUrl)}%0D%0AError: ${encodeURIComponent(removeBgError || '')}%0D%0A%0D%0AComments: ${encodeURIComponent(feedbackText)}`}
+                                      className="px-2.5 py-1.5 bg-white hover:bg-rose-50 border border-rose-200 text-rose-700 font-medium rounded-md text-[10px] transition-all flex items-center gap-1"
+                                    >
+                                      <span>Mail Client</span>
+                                    </a>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <button
+                              onClick={() => { setRemoveBgError(null); setFeedbackSubmitted(false); setFeedbackText(''); }}
+                              className="w-full py-2 bg-white hover:bg-zinc-50 text-zinc-650 border border-zinc-200 rounded-lg text-xs font-semibold transition-all shadow-sm"
+                            >
+                              Dismiss Error
+                            </button>
+                          </div>
                         )}
                       </div>
                     )}
@@ -2425,6 +2669,401 @@ export default function Home() {
                         AI website research details failed or are not available for this site.
                       </div>
                     )}
+                  </div>
+                )}
+
+
+                {/* 5F. DEVELOPER SPECS TAB */}
+                {activeAsset === 'dev-specs' && result.developerSpecs && (
+                  <div className="space-y-6 animate-slide-up-in">
+                    <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                      <FileText size={11} className="text-violet-500" />
+                      Developer & Assets Specifications
+                    </span>
+
+                    {/* Detected Colors Section */}
+                    {result.developerSpecs.colors && result.developerSpecs.colors.length > 0 && (
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">Detected Colors</span>
+                          <button
+                            onClick={() => {
+                              const cssRoot = `:root {\n${result.developerSpecs!.colors.map((c, i) => `  --color-${i + 1}: ${c};`).join('\n')}\n}`;
+                              handleCopyText(cssRoot, 'css-colors');
+                            }}
+                            className="text-[10px] font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2.5 py-1 bg-violet-50 border border-violet-100 rounded-lg cursor-pointer transition-colors shadow-sm animate-fade-in"
+                          >
+                            <Copy size={11} />
+                            <span>{copiedText['css-colors'] ? 'Copied CSS!' : 'Copy CSS Variables'}</span>
+                          </button>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 xs:grid-cols-5 gap-2.5">
+                          {result.developerSpecs.colors.map((col, index) => (
+                            <div 
+                              key={index} 
+                              onClick={() => handleCopyText(col, `devspec-col-${index}`)}
+                              className="group flex flex-col items-center gap-1.5 cursor-pointer transition-all hover:scale-105 bg-zinc-50 border border-zinc-100 p-2 rounded-xl"
+                            >
+                              <div 
+                                className="w-full aspect-square rounded-lg border border-zinc-200/40 shadow-inner flex items-center justify-center text-white"
+                                style={{ backgroundColor: col }}
+                              >
+                                <span className="opacity-0 group-hover:opacity-100 text-[9px] font-black bg-black/60 px-1.5 py-0.5 rounded backdrop-blur-[1px]">Copy</span>
+                              </div>
+                              <span className="text-[9px] text-zinc-400 font-mono font-medium truncate max-w-full">
+                                {copiedText[`devspec-col-${index}`] ? 'Copied!' : col}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Fonts Section */}
+                    {result.developerSpecs.fonts && result.developerSpecs.fonts.length > 0 && (
+                      <div className="space-y-2">
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">Detected Fonts</span>
+                        <div className="flex flex-wrap gap-2">
+                          {result.developerSpecs.fonts.map((font, idx) => (
+                            <div key={idx} className="px-3 py-1.5 bg-zinc-50 border border-zinc-150 text-zinc-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm font-mono">
+                              <span className="w-1.5 h-1.5 rounded-full bg-violet-500"></span>
+                              <span>{font}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* CSS Custom Design Tokens Section */}
+                    {result.developerSpecs.designTokens && result.developerSpecs.designTokens.length > 0 && (
+                      <div className="space-y-2">
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">CSS Design Tokens ({result.developerSpecs.designTokens.length})</span>
+                        <div className="bg-zinc-50 border border-zinc-150 rounded-xl p-3 max-h-[220px] overflow-y-auto font-mono text-[10px] space-y-1.5">
+                          {result.developerSpecs.designTokens.map((token, idx) => (
+                            <div 
+                              key={idx} 
+                              onClick={() => handleCopyText(`${token.name}: ${token.value};`, `token-${idx}`)}
+                              className="flex justify-between border-b border-zinc-200/40 pb-1 hover:bg-zinc-100/50 px-1 rounded cursor-pointer transition-colors"
+                              title="Click to copy definition"
+                            >
+                              <span className="text-violet-650 font-semibold truncate max-w-[50%]">{token.name}</span>
+                              <span className="text-zinc-600 truncate max-w-[48%] text-right">
+                                {copiedText[`token-${idx}`] ? 'Copied!' : token.value}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Crawled Assets Library Section */}
+                    <div className="space-y-3 pt-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-100 pb-2">
+                        <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase">Crawled Page Assets</span>
+                        
+                        {/* Search Assets */}
+                        <div className="relative w-full sm:w-64">
+                          <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                          <input
+                            type="text"
+                            placeholder="Search assets by name or path..."
+                            value={devSpecsSearch}
+                            onChange={(e) => setDevSpecsSearch(e.target.value)}
+                            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-700 placeholder:text-zinc-450 font-light focus:outline-none focus:ring-1 focus:ring-violet-400"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Expandable Categories */}
+                      <div className="space-y-2.5">
+                        {/* Images Section */}
+                        {(() => {
+                          const images = result.developerSpecs.assets.images || [];
+                          const filtered = images.filter(img => img.toLowerCase().includes(devSpecsSearch.toLowerCase()));
+                          if (images.length === 0) return null;
+
+                          return (
+                            <div className="border border-zinc-100 rounded-xl overflow-hidden bg-white/60">
+                              <button
+                                onClick={() => setCollapsedSections(prev => ({ ...prev, images: !prev.images }))}
+                                className="w-full bg-zinc-50 px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between hover:bg-zinc-100/60 transition-colors cursor-pointer"
+                              >
+                                <span className="text-xs font-bold text-zinc-700 flex items-center gap-1.5">
+                                  <ImageIcon size={12} className="text-zinc-500" />
+                                  <span>Image Assets ({filtered.length} of {images.length})</span>
+                                </span>
+                                <span className="text-[10px] text-zinc-400 font-semibold">
+                                  {collapsedSections.images ? 'Expand' : 'Collapse'}
+                                </span>
+                              </button>
+                              
+                              {!collapsedSections.images && (
+                                <div className="p-3 max-h-[280px] overflow-y-auto">
+                                  {filtered.length === 0 ? (
+                                    <div className="py-4 text-center text-zinc-400 text-xs font-light">No image assets match search</div>
+                                  ) : (
+                                    <div className="grid grid-cols-2 xs:grid-cols-4 gap-2">
+                                      {filtered.map((url, i) => (
+                                        <div key={i} className="group relative border border-zinc-200/60 rounded-lg overflow-hidden bg-zinc-50/50 aspect-video flex flex-col justify-between p-1.5 shadow-sm">
+                                          <img src={url} className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt="Asset" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-1.5">
+                                            <span className="text-[8px] text-white font-mono truncate mb-1">{url.split('/').pop()}</span>
+                                            <div className="flex gap-1">
+                                              <button
+                                                onClick={() => handleCopyText(url, `asset-img-${i}`)}
+                                                className="p-1 bg-white/90 hover:bg-white text-zinc-700 rounded text-[9px] font-bold flex-1 text-center cursor-pointer"
+                                              >
+                                                {copiedText[`asset-img-${i}`] ? 'Copied!' : 'Copy'}
+                                              </button>
+                                              <a
+                                                href={url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="p-1 bg-violet-600 hover:bg-violet-700 text-white rounded text-[9px] font-bold px-1.5 text-center flex items-center justify-center cursor-pointer"
+                                              >
+                                                <ExternalLink size={8} />
+                                              </a>
+                                            </div>
+                                          </div>
+                                          <div className="group-hover:opacity-0 transition-opacity z-10 bg-white/95 px-1.5 py-0.5 rounded text-[8px] font-mono font-medium text-zinc-500 truncate max-w-full">
+                                            {url.split('/').pop()}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {/* Favicons Section */}
+                        {(() => {
+                          const favicons = result.developerSpecs.assets.favicons || [];
+                          const filtered = favicons.filter(fav => fav.toLowerCase().includes(devSpecsSearch.toLowerCase()));
+                          if (favicons.length === 0) return null;
+
+                          return (
+                            <div className="border border-zinc-100 rounded-xl overflow-hidden bg-white/60">
+                              <button
+                                onClick={() => setCollapsedSections(prev => ({ ...prev, favicons: !prev.favicons }))}
+                                className="w-full bg-zinc-50 px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between hover:bg-zinc-100/60 transition-colors cursor-pointer"
+                              >
+                                <span className="text-xs font-bold text-zinc-700 flex items-center gap-1.5">
+                                  <GlobeIcon size={12} className="text-zinc-500" />
+                                  <span>Icons & Favicons ({filtered.length} of {favicons.length})</span>
+                                </span>
+                                <span className="text-[10px] text-zinc-400 font-semibold">
+                                  {collapsedSections.favicons ? 'Expand' : 'Collapse'}
+                                </span>
+                              </button>
+                              
+                              {!collapsedSections.favicons && (
+                                <div className="p-3 max-h-[220px] overflow-y-auto space-y-2">
+                                  {filtered.length === 0 ? (
+                                    <div className="py-4 text-center text-zinc-400 text-xs font-light">No icons match search</div>
+                                  ) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      {filtered.map((url, i) => (
+                                        <div key={i} className="flex items-center gap-2 border border-zinc-100 p-2 rounded-lg bg-zinc-50/50 hover:bg-zinc-50 transition-colors">
+                                          <img src={url} className="w-6 h-6 object-contain rounded bg-white p-0.5 border border-zinc-200 shrink-0" alt="Icon" onError={(e) => { e.currentTarget.src = '/icon.svg'; }} />
+                                          <div className="flex-1 min-w-0">
+                                            <span className="text-[10px] font-mono text-zinc-600 block truncate">{url}</span>
+                                          </div>
+                                          <div className="flex gap-1">
+                                            <button
+                                              onClick={() => handleCopyText(url, `asset-fav-${i}`)}
+                                              className="p-1 bg-white hover:bg-zinc-100 border border-zinc-200 text-zinc-650 rounded text-[9px] font-medium cursor-pointer"
+                                            >
+                                              {copiedText[`asset-fav-${i}`] ? 'Copied!' : 'Copy'}
+                                            </button>
+                                            <a
+                                              href={url}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="p-1 bg-zinc-100 hover:bg-zinc-200 border border-zinc-250 text-zinc-600 rounded flex items-center justify-center w-5 h-5 cursor-pointer"
+                                            >
+                                              <ExternalLink size={9} />
+                                            </a>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {/* Stylesheets Section */}
+                        {(() => {
+                          const stylesheets = result.developerSpecs.assets.stylesheets || [];
+                          const filtered = stylesheets.filter(css => css.toLowerCase().includes(devSpecsSearch.toLowerCase()));
+                          if (stylesheets.length === 0) return null;
+
+                          return (
+                            <div className="border border-zinc-100 rounded-xl overflow-hidden bg-white/60">
+                              <button
+                                onClick={() => setCollapsedSections(prev => ({ ...prev, stylesheets: !prev.stylesheets }))}
+                                className="w-full bg-zinc-50 px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between hover:bg-zinc-100/60 transition-colors cursor-pointer"
+                              >
+                                <span className="text-xs font-bold text-zinc-700 flex items-center gap-1.5">
+                                  <Layers size={12} className="text-zinc-500" />
+                                  <span>CSS Stylesheets ({filtered.length} of {stylesheets.length})</span>
+                                </span>
+                                <span className="text-[10px] text-zinc-400 font-semibold">
+                                  {collapsedSections.stylesheets ? 'Expand' : 'Collapse'}
+                                </span>
+                              </button>
+                              
+                              {!collapsedSections.stylesheets && (
+                                <div className="p-3 max-h-[220px] overflow-y-auto space-y-1.5 divide-y divide-zinc-200/20">
+                                  {filtered.length === 0 ? (
+                                    <div className="py-4 text-center text-zinc-400 text-xs font-light">No stylesheets match search</div>
+                                  ) : (
+                                    filtered.map((url, i) => (
+                                      <div key={i} className="flex items-center justify-between gap-3 py-1.5 first:pt-0 last:pb-0">
+                                        <span className="text-[10px] font-mono text-zinc-650 truncate flex-1">{url}</span>
+                                        <div className="flex gap-1 shrink-0">
+                                          <button
+                                            onClick={() => handleCopyText(url, `asset-css-${i}`)}
+                                            className="px-2 py-1 bg-white hover:bg-zinc-100 border border-zinc-200 text-zinc-600 rounded text-[9px] font-medium cursor-pointer"
+                                          >
+                                            {copiedText[`asset-css-${i}`] ? 'Copied!' : 'Copy'}
+                                          </button>
+                                          <a
+                                            href={url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="px-2 py-1 bg-zinc-100 hover:bg-zinc-200 border border-zinc-250 text-zinc-600 rounded text-[9px] font-medium flex items-center gap-0.5 cursor-pointer"
+                                          >
+                                            <span>Open</span>
+                                            <ExternalLink size={9} />
+                                          </a>
+                                        </div>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {/* Scripts Section */}
+                        {(() => {
+                          const scripts = result.developerSpecs.assets.scripts || [];
+                          const filtered = scripts.filter(js => js.toLowerCase().includes(devSpecsSearch.toLowerCase()));
+                          if (scripts.length === 0) return null;
+
+                          return (
+                            <div className="border border-zinc-100 rounded-xl overflow-hidden bg-white/60">
+                              <button
+                                onClick={() => setCollapsedSections(prev => ({ ...prev, scripts: !prev.scripts }))}
+                                className="w-full bg-zinc-50 px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between hover:bg-zinc-100/60 transition-colors cursor-pointer"
+                              >
+                                <span className="text-xs font-bold text-zinc-700 flex items-center gap-1.5">
+                                  <FileText size={12} className="text-zinc-500" />
+                                  <span>Javascript Scripts ({filtered.length} of {scripts.length})</span>
+                                </span>
+                                <span className="text-[10px] text-zinc-400 font-semibold">
+                                  {collapsedSections.scripts ? 'Expand' : 'Collapse'}
+                                </span>
+                              </button>
+                              
+                              {!collapsedSections.scripts && (
+                                <div className="p-3 max-h-[220px] overflow-y-auto space-y-1.5 divide-y divide-zinc-200/20">
+                                  {filtered.length === 0 ? (
+                                    <div className="py-4 text-center text-zinc-400 text-xs font-light">No script files match search</div>
+                                  ) : (
+                                    filtered.map((url, i) => (
+                                      <div key={i} className="flex items-center justify-between gap-3 py-1.5 first:pt-0 last:pb-0">
+                                        <span className="text-[10px] font-mono text-zinc-650 truncate flex-1">{url}</span>
+                                        <div className="flex gap-1 shrink-0">
+                                          <button
+                                            onClick={() => handleCopyText(url, `asset-js-${i}`)}
+                                            className="px-2 py-1 bg-white hover:bg-zinc-100 border border-zinc-200 text-zinc-600 rounded text-[9px] font-medium cursor-pointer"
+                                          >
+                                            {copiedText[`asset-js-${i}`] ? 'Copied!' : 'Copy'}
+                                          </button>
+                                          <a
+                                            href={url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="px-2 py-1 bg-zinc-100 hover:bg-zinc-200 border border-zinc-250 text-zinc-650 rounded text-[9px] font-medium flex items-center gap-0.5 cursor-pointer"
+                                          >
+                                            <span>Open</span>
+                                            <ExternalLink size={9} />
+                                          </a>
+                                        </div>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {/* Media Section */}
+                        {(() => {
+                          const media = result.developerSpecs.assets.media || [];
+                          const filtered = media.filter(med => med.toLowerCase().includes(devSpecsSearch.toLowerCase()));
+                          if (media.length === 0) return null;
+
+                          return (
+                            <div className="border border-zinc-100 rounded-xl overflow-hidden bg-white/60">
+                              <button
+                                onClick={() => setCollapsedSections(prev => ({ ...prev, media: !prev.media }))}
+                                className="w-full bg-zinc-50 px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between hover:bg-zinc-100/60 transition-colors cursor-pointer"
+                              >
+                                <span className="text-xs font-bold text-zinc-700 flex items-center gap-1.5">
+                                  <VideoIcon size={12} className="text-zinc-500" />
+                                  <span>Media Files ({filtered.length} of {media.length})</span>
+                                </span>
+                                <span className="text-[10px] text-zinc-400 font-semibold">
+                                  {collapsedSections.media ? 'Expand' : 'Collapse'}
+                                </span>
+                              </button>
+                              
+                              {!collapsedSections.media && (
+                                <div className="p-3 max-h-[220px] overflow-y-auto space-y-1.5 divide-y divide-zinc-200/20">
+                                  {filtered.length === 0 ? (
+                                    <div className="py-4 text-center text-zinc-400 text-xs font-light">No media assets match search</div>
+                                  ) : (
+                                    filtered.map((url, i) => (
+                                      <div key={i} className="flex items-center justify-between gap-3 py-1.5 first:pt-0 last:pb-0">
+                                        <span className="text-[10px] font-mono text-zinc-650 truncate flex-1">{url}</span>
+                                        <div className="flex gap-1 shrink-0">
+                                          <button
+                                            onClick={() => handleCopyText(url, `asset-media-${i}`)}
+                                            className="px-2 py-1 bg-white hover:bg-zinc-100 border border-zinc-200 text-zinc-600 rounded text-[9px] font-medium cursor-pointer"
+                                          >
+                                            {copiedText[`asset-media-${i}`] ? 'Copied!' : 'Copy'}
+                                          </button>
+                                          <a
+                                            href={url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="px-2 py-1 bg-zinc-100 hover:bg-zinc-200 border border-zinc-250 text-zinc-650 rounded text-[9px] font-medium flex items-center gap-0.5 cursor-pointer"
+                                          >
+                                            <span>Open</span>
+                                            <ExternalLink size={9} />
+                                          </a>
+                                        </div>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
                   </div>
                 )}
 

@@ -33,6 +33,15 @@ interface LogEntry {
   errorMessage?: string;
 }
 
+interface FeedbackEntry {
+  _id: string;
+  ip: string;
+  timestamp: string;
+  url?: string;
+  errorMessage?: string;
+  feedbackText: string;
+}
+
 interface AdminMetrics {
   totalScans: number;
   uniqueUsers: number;
@@ -66,9 +75,11 @@ export default function AdminPanel() {
   const [apiKeysStatus, setApiKeysStatus] = useState<ApiKeysStatus | null>(null);
   const [apiUsageStats, setApiUsageStats] = useState<ApiUsageStats | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [feedbacks, setFeedbacks] = useState<FeedbackEntry[]>([]);
   
   // Pagination & Filters states
   const [page, setPage] = useState(1);
+  const [activeTab, setActiveTab] = useState<'logs' | 'feedbacks'>('logs');
   const [totalPages, setTotalPages] = useState(1);
   const [search, setSearch] = useState('');
   const [actionFilter, setActionFilter] = useState('');
@@ -95,6 +106,7 @@ export default function AdminPanel() {
         setApiKeysStatus(data.apiKeysStatus);
         setApiUsageStats(data.apiUsageStats);
         setLogs(data.logs);
+        setFeedbacks(data.feedbacks || []);
         setPage(data.pagination.page);
         setTotalPages(data.pagination.totalPages);
         setIsAuthenticated(true);
@@ -382,41 +394,58 @@ export default function AdminPanel() {
           
           {/* Logger Controls / Filter */}
           <div className="p-5 border-b border-zinc-900 flex flex-col md:flex-row gap-4 items-center justify-between">
-            <h3 className="text-sm font-semibold text-white self-start md:self-center">Recent Activity Logs</h3>
+            <div className="flex items-center gap-4 self-start md:self-center">
+              <button
+                onClick={() => setActiveTab('logs')}
+                className={`text-sm font-semibold tracking-wide cursor-pointer transition-all border-b-2 px-1 pb-1 ${activeTab === 'logs' ? 'text-white border-violet-600 font-bold' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}
+              >
+                Recent Activity Logs
+              </button>
+              <button
+                onClick={() => setActiveTab('feedbacks')}
+                className={`text-sm font-semibold tracking-wide cursor-pointer transition-all border-b-2 px-1 pb-1 ${activeTab === 'feedbacks' ? 'text-white border-violet-600 font-bold' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}
+              >
+                User Feedbacks ({feedbacks.length})
+              </button>
+            </div>
             
             <div className="flex flex-wrap gap-2 w-full md:w-auto items-center">
-              <div className="relative flex-grow md:flex-grow-0 md:w-60">
-                <input
-                  type="text"
-                  placeholder="Search by IP or URL..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
-                  className="w-full bg-zinc-900/60 border border-zinc-800/80 rounded-xl text-xs py-2.5 pl-8 pr-3 outline-none focus:border-zinc-700 text-white transition-all placeholder:text-zinc-500"
-                />
-                <Search size={13} className="text-zinc-500 absolute left-2.5 top-3.5" />
-              </div>
+              {activeTab === 'logs' && (
+                <>
+                  <div className="relative flex-grow md:flex-grow-0 md:w-60">
+                    <input
+                      type="text"
+                      placeholder="Search by IP or URL..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+                      className="w-full bg-zinc-900/60 border border-zinc-800/80 rounded-xl text-xs py-2.5 pl-8 pr-3 outline-none focus:border-zinc-700 text-white transition-all placeholder:text-zinc-500"
+                    />
+                    <Search size={13} className="text-zinc-500 absolute left-2.5 top-3.5" />
+                  </div>
 
-              <select
-                value={actionFilter}
-                onChange={(e) => {
-                  setActionFilter(e.target.value);
-                  fetchStats(1, search, e.target.value);
-                }}
-                className="bg-zinc-900/60 border border-zinc-800/80 text-zinc-300 rounded-xl text-xs py-2.5 px-3 outline-none cursor-pointer focus:border-zinc-700"
-              >
-                <option value="">All Actions</option>
-                <option value="analyze-base">Analyze (Base)</option>
-                <option value="analyze-intel">Analyze (Intel)</option>
-                <option value="analyze-lighthouse">Analyze (Lighthouse)</option>
-                <option value="analyze-ai-research">Analyze (AI Research)</option>
-                <option value="analyze-ai-writer">Analyze (AI Writer)</option>
-                <option value="download-video">Download Video</option>
-                <option value="download-audio">Download Audio</option>
-                <option value="transcribe">Transcribe</option>
-                <option value="remove-bg">Remove Background</option>
-                <option value="screenshot">Screenshot</option>
-              </select>
+                  <select
+                    value={actionFilter}
+                    onChange={(e) => {
+                      setActionFilter(e.target.value);
+                      fetchStats(1, search, e.target.value);
+                    }}
+                    className="bg-zinc-900/60 border border-zinc-800/80 text-zinc-300 rounded-xl text-xs py-2.5 px-3 outline-none cursor-pointer focus:border-zinc-700"
+                  >
+                    <option value="">All Actions</option>
+                    <option value="analyze-base">Analyze (Base)</option>
+                    <option value="analyze-intel">Analyze (Intel)</option>
+                    <option value="analyze-lighthouse">Analyze (Lighthouse)</option>
+                    <option value="analyze-ai-research">Analyze (AI Research)</option>
+                    <option value="analyze-ai-writer">Analyze (AI Writer)</option>
+                    <option value="download-video">Download Video</option>
+                    <option value="download-audio">Download Audio</option>
+                    <option value="transcribe">Transcribe</option>
+                    <option value="remove-bg">Remove Background</option>
+                    <option value="screenshot">Screenshot</option>
+                  </select>
+                </>
+              )}
 
               <button
                 onClick={applyFilters}
@@ -426,7 +455,7 @@ export default function AdminPanel() {
                 <RefreshCw size={14} className={`${isLoadingStats ? 'animate-spin' : ''}`} />
               </button>
 
-              {(search || actionFilter) && (
+              {activeTab === 'logs' && (search || actionFilter) && (
                 <button
                   onClick={clearFilters}
                   className="px-3 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-xl text-xs font-semibold cursor-pointer border border-zinc-800/40"
@@ -439,112 +468,175 @@ export default function AdminPanel() {
 
           {/* Table Container */}
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-zinc-950/80 border-b border-zinc-900 text-zinc-500 font-semibold tracking-wider">
-                  <th className="p-4 w-44">Timestamp</th>
-                  <th className="p-4 w-36">IP Address</th>
-                  <th className="p-4 w-36">Action</th>
-                  <th className="p-4 w-28">Platform</th>
-                  <th className="p-4 min-w-[200px]">URL / Resource</th>
-                  <th className="p-4 w-28">APIs Called</th>
-                  <th className="p-4 w-20">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-900/50">
-                {logs.length > 0 ? (
-                  logs.map((log) => (
-                    <tr key={log._id} className="hover:bg-zinc-900/10 transition-colors">
-                      <td className="p-4 text-zinc-500 font-mono whitespace-nowrap">
-                        {new Date(log.timestamp).toLocaleString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: 'numeric',
-                          minute: '2-digit',
-                          second: '2-digit',
-                          hour12: false
-                        })}
-                      </td>
-                      <td className="p-4 font-mono font-medium text-zinc-300 whitespace-nowrap">{log.ip}</td>
-                      <td className="p-4">
-                        <span className="px-2 py-0.5 bg-zinc-900/80 text-zinc-300 border border-zinc-800 rounded-md font-medium text-[10px] font-mono">
-                          {log.action}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        {log.platform ? (
-                          <span className="px-1.5 py-0.5 bg-violet-950/30 text-violet-400 border border-violet-900/20 rounded font-medium text-[10px] font-sans">
-                            {log.platform}
+            {activeTab === 'logs' ? (
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-zinc-950/80 border-b border-zinc-900 text-zinc-500 font-semibold tracking-wider">
+                    <th className="p-4 w-44">Timestamp</th>
+                    <th className="p-4 w-36">IP Address</th>
+                    <th className="p-4 w-36">Action</th>
+                    <th className="p-4 w-28">Platform</th>
+                    <th className="p-4 min-w-[200px]">URL / Resource</th>
+                    <th className="p-4 w-28">APIs Called</th>
+                    <th className="p-4 w-20">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-900/50">
+                  {logs.length > 0 ? (
+                    logs.map((log) => (
+                      <tr key={log._id} className="hover:bg-zinc-900/10 transition-colors">
+                        <td className="p-4 text-zinc-500 font-mono whitespace-nowrap">
+                          {new Date(log.timestamp).toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: false
+                          })}
+                        </td>
+                        <td className="p-4 font-mono font-medium text-zinc-300 whitespace-nowrap">{log.ip}</td>
+                        <td className="p-4">
+                          <span className="px-2 py-0.5 bg-zinc-900/80 text-zinc-300 border border-zinc-800 rounded-md font-medium text-[10px] font-mono">
+                            {log.action}
                           </span>
-                        ) : (
-                          <span className="text-zinc-600">—</span>
-                        )}
-                      </td>
-                      <td className="p-4 font-mono">
-                        {log.url ? (
-                          <div className="flex items-center gap-1 max-w-md">
-                            <span className="truncate block select-all" title={log.url}>{log.url}</span>
-                            <a href={log.url} target="_blank" rel="noopener noreferrer" className="text-zinc-600 hover:text-zinc-400 shrink-0">
-                              <ExternalLink size={10} />
-                            </a>
-                          </div>
-                        ) : (
-                          <span className="text-zinc-600">—</span>
-                        )}
-                      </td>
-                      <td className="p-4 font-mono text-[10px] text-zinc-400 whitespace-nowrap">{log.apiUsed || <span className="text-zinc-600">—</span>}</td>
-                      <td className="p-4">
-                        {log.status === 'success' ? (
-                          <span className="px-1.5 py-0.5 bg-emerald-950/50 text-emerald-400 rounded-md font-semibold text-[9px] font-sans uppercase flex items-center gap-0.5 w-fit border border-emerald-900/35">
-                            <CheckCircle size={8} /> OK
-                          </span>
-                        ) : (
-                          <span 
-                            className="px-1.5 py-0.5 bg-red-950/50 text-red-400 rounded-md font-semibold text-[9px] font-sans uppercase flex items-center gap-0.5 w-fit border border-red-900/35 cursor-help"
-                            title={log.errorMessage || 'Unknown extraction error'}
-                          >
-                            <XCircle size={8} /> Err
-                          </span>
-                        )}
+                        </td>
+                        <td className="p-4">
+                          {log.platform ? (
+                            <span className="px-1.5 py-0.5 bg-violet-950/30 text-violet-400 border border-violet-900/20 rounded font-medium text-[10px] font-sans">
+                              {log.platform}
+                            </span>
+                          ) : (
+                            <span className="text-zinc-600">—</span>
+                          )}
+                        </td>
+                        <td className="p-4 font-mono">
+                          {log.url ? (
+                            <div className="flex items-center gap-1 max-w-md">
+                              <span className="truncate block select-all" title={log.url}>{log.url}</span>
+                              <a href={log.url} target="_blank" rel="noopener noreferrer" className="text-zinc-600 hover:text-zinc-400 shrink-0">
+                                <ExternalLink size={10} />
+                              </a>
+                            </div>
+                          ) : (
+                            <span className="text-zinc-600">—</span>
+                          )}
+                        </td>
+                        <td className="p-4 font-mono text-[10px] text-zinc-400 whitespace-nowrap">{log.apiUsed || <span className="text-zinc-600">—</span>}</td>
+                        <td className="p-4">
+                          {log.status === 'success' ? (
+                            <span className="px-1.5 py-0.5 bg-emerald-950/50 text-emerald-400 rounded-md font-semibold text-[9px] font-sans uppercase flex items-center gap-0.5 w-fit border border-emerald-900/35">
+                              <CheckCircle size={8} /> OK
+                            </span>
+                          ) : (
+                            <span 
+                              className="px-1.5 py-0.5 bg-red-950/50 text-red-400 rounded-md font-semibold text-[9px] font-sans uppercase flex items-center gap-0.5 w-fit border border-red-900/35 cursor-help"
+                              title={log.errorMessage || 'Unknown extraction error'}
+                            >
+                              <XCircle size={8} /> Err
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-zinc-500 italic">
+                        {isLoadingStats ? 'Loading user activities...' : 'No activity logs match the search query.'}
                       </td>
                     </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={7} className="p-8 text-center text-zinc-500 italic">
-                      {isLoadingStats ? 'Loading user activities...' : 'No activity logs match the search query.'}
-                    </td>
+                  )}
+                </tbody>
+              </table>
+            ) : (
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-zinc-950/80 border-b border-zinc-900 text-zinc-500 font-semibold tracking-wider">
+                    <th className="p-4 w-44">Timestamp</th>
+                    <th className="p-4 w-36">IP Address</th>
+                    <th className="p-4 min-w-[200px]">URL / Resource</th>
+                    <th className="p-4 min-w-[150px]">Error Message</th>
+                    <th className="p-4 min-w-[250px]">User Feedback</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-zinc-900/50">
+                  {feedbacks.length > 0 ? (
+                    feedbacks.map((fb) => (
+                      <tr key={fb._id} className="hover:bg-zinc-900/10 transition-colors">
+                        <td className="p-4 text-zinc-500 font-mono whitespace-nowrap">
+                          {new Date(fb.timestamp).toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: false
+                          })}
+                        </td>
+                        <td className="p-4 font-mono font-medium text-zinc-300 whitespace-nowrap">{fb.ip}</td>
+                        <td className="p-4 font-mono">
+                          {fb.url ? (
+                            <div className="flex items-center gap-1 max-w-sm">
+                              <span className="truncate block select-all text-zinc-400 text-[10px]" title={fb.url}>{fb.url}</span>
+                              <a href={fb.url} target="_blank" rel="noopener noreferrer" className="text-zinc-650 hover:text-zinc-400 shrink-0">
+                                <ExternalLink size={10} />
+                              </a>
+                            </div>
+                          ) : (
+                            <span className="text-zinc-600">—</span>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          {fb.errorMessage ? (
+                            <span className="text-red-400 font-mono text-[10px] break-all line-clamp-2" title={fb.errorMessage}>
+                              {fb.errorMessage}
+                            </span>
+                          ) : (
+                            <span className="text-zinc-600">—</span>
+                          )}
+                        </td>
+                        <td className="p-4 text-zinc-200 select-text font-light whitespace-pre-wrap">{fb.feedbackText}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-zinc-500 italic">
+                        No feedbacks submitted yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
           </div>
 
           {/* Table Pagination */}
-          <div className="p-4 border-t border-zinc-900 bg-zinc-950/40 flex justify-between items-center text-xs">
-            <span className="text-zinc-500">
-              Showing page <strong className="text-zinc-300 font-semibold">{page}</strong> of <strong className="text-zinc-300 font-semibold">{totalPages}</strong>
-            </span>
+          {activeTab === 'logs' && (
+            <div className="p-4 border-t border-zinc-900 bg-zinc-950/40 flex justify-between items-center text-xs">
+              <span className="text-zinc-500">
+                Showing page <strong className="text-zinc-300 font-semibold">{page}</strong> of <strong className="text-zinc-300 font-semibold">{totalPages}</strong>
+              </span>
 
-            <div className="flex gap-2">
-              <button
-                disabled={page <= 1 || isLoadingStats}
-                onClick={() => fetchStats(page - 1, search, actionFilter)}
-                className="px-3 py-2 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg border border-zinc-800/40 text-zinc-300 flex items-center gap-1 cursor-pointer transition-all"
-              >
-                <ArrowLeft size={13} />
-                <span>Prev</span>
-              </button>
-              <button
-                disabled={page >= totalPages || isLoadingStats}
-                onClick={() => fetchStats(page + 1, search, actionFilter)}
-                className="px-3 py-2 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg border border-zinc-800/40 text-zinc-300 flex items-center gap-1 cursor-pointer transition-all"
-              >
-                <span>Next</span>
-                <ArrowRight size={13} />
-              </button>
+              <div className="flex gap-2">
+                <button
+                  disabled={page <= 1 || isLoadingStats}
+                  onClick={() => fetchStats(page - 1, search, actionFilter)}
+                  className="px-3 py-2 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg border border-zinc-800/40 text-zinc-300 flex items-center gap-1 cursor-pointer transition-all"
+                >
+                  <ArrowLeft size={13} />
+                  <span>Prev</span>
+                </button>
+                <button
+                  disabled={page >= totalPages || isLoadingStats}
+                  onClick={() => fetchStats(page + 1, search, actionFilter)}
+                  className="px-3 py-2 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg border border-zinc-800/40 text-zinc-300 flex items-center gap-1 cursor-pointer transition-all"
+                >
+                  <span>Next</span>
+                  <ArrowRight size={13} />
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
         </div>
 

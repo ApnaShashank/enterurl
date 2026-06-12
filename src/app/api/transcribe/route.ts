@@ -3,7 +3,18 @@ import { connectToDatabase } from '@/lib/db';
 import ApiUsageLog from '@/models/ApiUsageLog';
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY || '';
+const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY || '';
 const ASSEMBLYAI_BASE = 'https://api.assemblyai.com/v2';
+
+const COBALT_INSTANCES = [
+  'https://api.cobalt.liubquanti.click',
+  'https://cobaltapi.cjs.nz',
+  'https://cobaltapi.kittycat.boo',
+  'https://cobalt.moe/api',
+  'https://cobalt.drgns.space',
+  'https://cobalt.k6.vc',
+  'https://cobalt.sh1nypanda.com'
+];
 
 // POST /api/transcribe — submit audio URL for transcription, return transcript_id
 export async function POST(request: NextRequest) {
@@ -33,6 +44,97 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'audioUrl is required' }, { status: 400 });
     }
 
+    // Resolve non-direct video/social platform audio link first via Cobalt
+    let resolvedAudioUrl = audioUrl;
+    const isDirectAudio = /\.(mp3|wav|ogg|aac|m4a|flac|wma|opus)(\?.*)?$/i.test(audioUrl);
+    if (!isDirectAudio) {
+      for (const baseInstanceUrl of COBALT_INSTANCES) {
+        try {
+          const res = await fetch(baseInstanceUrl, {
+            method: 'POST',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              url: audioUrl,
+              downloadMode: 'audio',
+              audioFormat: 'mp3',
+              filenameStyle: 'basic'
+            }),
+            signal: AbortSignal.timeout(8000)
+          });
+          const data = await res.json();
+          if (res.ok && data && data.url) {
+            resolvedAudioUrl = data.url;
+            break;
+          }
+        } catch (err: any) {
+          console.error(`Cobalt resolve failed for ${baseInstanceUrl} during transcribe:`, err.message);
+        }
+      }
+    }
+
+    // Try Deepgram first if key is configured (faster, synchronous)
+    let deepgramSucceeded = false;
+    let deepgramResult = null;
+
+    if (DEEPGRAM_API_KEY) {
+      try {
+        console.log('Attempting transcription via Deepgram...');
+        const deepgramRes = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Token ${DEEPGRAM_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            url: resolvedAudioUrl
+          }),
+          signal: AbortSignal.timeout(8000) // 8s timeout to prevent Vercel serverless timeout
+        });
+
+        if (deepgramRes.ok) {
+          const dgData = await deepgramRes.json();
+          const transcriptText = dgData.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+          const confidence = dgData.results?.channels?.[0]?.alternatives?.[0]?.confidence || null;
+          const words = dgData.results?.channels?.[0]?.alternatives?.[0]?.words || null;
+
+          if (transcriptText) {
+            deepgramResult = {
+              success: true,
+              status: 'completed',
+              text: transcriptText,
+              confidence,
+              words,
+              apiUsed: 'Deepgram'
+            };
+            deepgramSucceeded = true;
+          }
+        } else {
+          console.warn(`Deepgram API returned status ${deepgramRes.status}`);
+        }
+      } catch (dgErr: any) {
+        console.error('Deepgram transcription failed or timed out:', dgErr.message);
+      }
+    }
+
+    if (deepgramSucceeded && deepgramResult) {
+      try {
+        await ApiUsageLog.create({
+          ip,
+          action: 'transcribe',
+          url: targetAudioUrl,
+          platform: 'audio',
+          apiUsed: 'Deepgram',
+          status: 'success'
+        });
+      } catch (logErr) {}
+
+      return NextResponse.json(deepgramResult);
+    }
+
+    // Fallback to AssemblyAI (Asynchronous, polled)
     const response = await fetch(`${ASSEMBLYAI_BASE}/transcript`, {
       method: 'POST',
       headers: {
@@ -40,7 +142,7 @@ export async function POST(request: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        audio_url: audioUrl,
+        audio_url: resolvedAudioUrl,
         language_detection: true,
         punctuate: true,
         format_text: true,

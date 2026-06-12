@@ -1134,6 +1134,7 @@ export async function POST(request: NextRequest) {
       title: parsedTitle, description: parsedDesc, previewUrl: ogImage, mediaUrls: ogImage ? [ogImage] : [],
       embedUrl: ogVideo || undefined, author: author || undefined, hashtags,
       techStack: techStack.length > 0 ? techStack : undefined,
+      developerSpecs: extractDeveloperSpecs(htmlText, finalUrl),
       linkIntel: {
         redirectChain, ipAddress, dnsRecords,
         safe: true,
@@ -1179,4 +1180,249 @@ async function buildDirectMediaResponse(
     mediaUrls: [url],
     linkIntel: { redirectChain, ipAddress: 'Unknown', dnsRecords: [], whois: null, virusTotal: null, safe: true, shortUrl: '', headers },
   });
+}
+
+function extractDeveloperSpecs(htmlText: string, finalUrl: string) {
+  const fonts = new Set<string>();
+  const colorsMap: Record<string, number> = {};
+  const designTokens: Array<{ name: string; value: string }> = [];
+  const assets = {
+    images: new Set<string>(),
+    stylesheets: new Set<string>(),
+    scripts: new Set<string>(),
+    media: new Set<string>(),
+    favicons: new Set<string>()
+  };
+
+  if (!htmlText) {
+    return {
+      colors: [],
+      fonts: [],
+      designTokens: [],
+      assets: { images: [], stylesheets: [], scripts: [], media: [], favicons: [] }
+    };
+  }
+
+  const $ = cheerio.load(htmlText);
+
+  // Helper to resolve URLs absolutely
+  const resolveUrl = (path: string): string | null => {
+    if (!path || typeof path !== 'string') return null;
+    const trimmed = path.trim();
+    if (trimmed.startsWith('data:')) return null; // skip base64
+    try {
+      return new URL(trimmed, finalUrl).href;
+    } catch {
+      return null;
+    }
+  };
+
+  // Tracking domains regex
+  const isTracking = (urlStr: string): boolean => {
+    return /google-analytics|googletagmanager|facebook\.net|connect\.facebook|clarity\.ms|hotjar|mixpanel|segment\.io|doubleclick|amplitude|sentry|crazyegg|optimizely/i.test(urlStr);
+  };
+
+  // 1. Parse fonts from google fonts links
+  $('link[href*="fonts.googleapis.com"]').each((_, el) => {
+    const href = $(el).attr('href') || '';
+    try {
+      const urlObj = new URL(href, finalUrl);
+      const family = urlObj.searchParams.get('family');
+      if (family) {
+        family.split('|').forEach(f => {
+          const name = f.split(':')[0].replace(/\+/g, ' ').trim();
+          if (name) fonts.add(name);
+        });
+      }
+    } catch {}
+  });
+
+  // Parse styles content
+  $('style').each((_, el) => {
+    const cssText = $(el).text();
+    // Scan font-family in CSS
+    const fontFamilyRegex = /font-family\s*:\s*([^;!}\n]+)/gi;
+    let fm;
+    while ((fm = fontFamilyRegex.exec(cssText)) !== null) {
+      const families = fm[1].split(',');
+      families.forEach(f => {
+        const cleaned = f.replace(/['"]/g, '').trim();
+        if (cleaned && !['sans-serif', 'serif', 'monospace', 'cursive', 'fantasy', 'inherit', 'initial', 'revert', 'unset'].includes(cleaned.toLowerCase())) {
+          fonts.add(cleaned);
+        }
+      });
+    }
+
+    // Scan custom properties (design tokens)
+    const customPropRegex = /(--[a-zA-Z0-9_-]+)\s*:\s*([^;!}\n]+)/gi;
+    let cp;
+    while ((cp = customPropRegex.exec(cssText)) !== null) {
+      const name = cp[1].trim();
+      const value = cp[2].trim();
+      if (!designTokens.some(t => t.name === name)) {
+        designTokens.push({ name, value });
+      }
+    }
+
+    // Scan colors from style tags
+    const hexColorRegex = /#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g;
+    const rgbColorRegex = /rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*(?:,\s*[\d.]+\s*)?\)/gi;
+    const hslColorRegex = /hsla?\(\s*\d+\s*,\s*\d+%\s*,\s*\d+%\s*(?:,\s*[\d.]+\s*)?\)/gi;
+
+    let hc;
+    while ((hc = hexColorRegex.exec(cssText)) !== null) {
+      const color = hc[0].toLowerCase();
+      colorsMap[color] = (colorsMap[color] || 0) + 1;
+    }
+    let rc;
+    while ((rc = rgbColorRegex.exec(cssText)) !== null) {
+      const color = rc[0].toLowerCase();
+      colorsMap[color] = (colorsMap[color] || 0) + 1;
+    }
+    let hsc;
+    while ((hsc = hslColorRegex.exec(cssText)) !== null) {
+      const color = hsc[0].toLowerCase();
+      colorsMap[color] = (colorsMap[color] || 0) + 1;
+    }
+  });
+
+  // Parse style attributes in HTML elements
+  $('[style]').each((_, el) => {
+    const styleAttr = $(el).attr('style') || '';
+    // font-family
+    const fontFamilyRegex = /font-family\s*:\s*([^;!}\n]+)/gi;
+    let fm;
+    while ((fm = fontFamilyRegex.exec(styleAttr)) !== null) {
+      const families = fm[1].split(',');
+      families.forEach(f => {
+        const cleaned = f.replace(/['"]/g, '').trim();
+        if (cleaned && !['sans-serif', 'serif', 'monospace', 'cursive', 'fantasy', 'inherit', 'initial', 'revert', 'unset'].includes(cleaned.toLowerCase())) {
+          fonts.add(cleaned);
+        }
+      });
+    }
+
+    // colors
+    const hexColorRegex = /#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g;
+    const rgbColorRegex = /rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*(?:,\s*[\d.]+\s*)?\)/gi;
+    const hslColorRegex = /hsla?\(\s*\d+\s*,\s*\d+%\s*,\s*\d+%\s*(?:,\s*[\d.]+\s*)?\)/gi;
+
+    let hc;
+    while ((hc = hexColorRegex.exec(styleAttr)) !== null) {
+      const color = hc[0].toLowerCase();
+      colorsMap[color] = (colorsMap[color] || 0) + 1;
+    }
+    let rc;
+    while ((rc = rgbColorRegex.exec(styleAttr)) !== null) {
+      const color = rc[0].toLowerCase();
+      colorsMap[color] = (colorsMap[color] || 0) + 1;
+    }
+    let hsc;
+    while ((hsc = hslColorRegex.exec(styleAttr)) !== null) {
+      const color = hsc[0].toLowerCase();
+      colorsMap[color] = (colorsMap[color] || 0) + 1;
+    }
+  });
+
+  // Clean and limit colors to top 10 unique
+  const sortedColors = Object.entries(colorsMap)
+    .sort((a, b) => b[1] - a[1])
+    .map(entry => entry[0]);
+  const topColors = sortedColors.slice(0, 10);
+
+  // 2. Gather Assets
+  // Image assets: img tags, og:image meta tags, link image_src tags
+  $('img').each((_, el) => {
+    const src = $(el).attr('src');
+    const dataSrc = $(el).attr('data-src');
+    if (src) {
+      const abs = resolveUrl(src);
+      if (abs && !isTracking(abs)) assets.images.add(abs);
+    }
+    if (dataSrc) {
+      const abs = resolveUrl(dataSrc);
+      if (abs && !isTracking(abs)) assets.images.add(abs);
+    }
+  });
+
+  // Favicons
+  $('link[rel*="icon"]').each((_, el) => {
+    const href = $(el).attr('href');
+    if (href) {
+      const abs = resolveUrl(href);
+      if (abs) assets.favicons.add(abs);
+    }
+  });
+
+  // Stylesheets
+  $('link[rel="stylesheet"]').each((_, el) => {
+    const href = $(el).attr('href');
+    if (href) {
+      const abs = resolveUrl(href);
+      if (abs && !isTracking(abs)) assets.stylesheets.add(abs);
+    }
+  });
+
+  // Scripts
+  $('script[src]').each((_, el) => {
+    const src = $(el).attr('src');
+    if (src) {
+      const abs = resolveUrl(src);
+      if (abs && !isTracking(abs)) assets.scripts.add(abs);
+    }
+  });
+
+  // Media (videos, source tags, audios)
+  $('video, audio, source').each((_, el) => {
+    const src = $(el).attr('src');
+    if (src) {
+      const abs = resolveUrl(src);
+      if (abs && !isTracking(abs)) assets.media.add(abs);
+    }
+  });
+
+  // Background images
+  const bgImgRegex = /url\(['"]?([^'")]+)['"]?\)/gi;
+  $('style').each((_, el) => {
+    const cssText = $(el).text();
+    let bgm;
+    while ((bgm = bgImgRegex.exec(cssText)) !== null) {
+      const abs = resolveUrl(bgm[1]);
+      if (abs && !isTracking(abs)) {
+        if (/\.(jpg|jpeg|png|webp|gif|svg|avif|bmp|tiff)/i.test(abs)) {
+          assets.images.add(abs);
+        } else if (/\.(mp4|webm|ogg|mp3|wav|m4a|aac)/i.test(abs)) {
+          assets.media.add(abs);
+        }
+      }
+    }
+  });
+
+  $('[style]').each((_, el) => {
+    const styleAttr = $(el).attr('style') || '';
+    let bgm;
+    while ((bgm = bgImgRegex.exec(styleAttr)) !== null) {
+      const abs = resolveUrl(bgm[1]);
+      if (abs && !isTracking(abs)) {
+        if (/\.(jpg|jpeg|png|webp|gif|svg|avif|bmp|tiff)/i.test(abs)) {
+          assets.images.add(abs);
+        } else if (/\.(mp4|webm|ogg|mp3|wav|m4a|aac)/i.test(abs)) {
+          assets.media.add(abs);
+        }
+      }
+    }
+  });
+
+  return {
+    colors: topColors,
+    fonts: Array.from(fonts).slice(0, 10),
+    designTokens: designTokens.slice(0, 30),
+    assets: {
+      images: Array.from(assets.images),
+      stylesheets: Array.from(assets.stylesheets),
+      scripts: Array.from(assets.scripts),
+      media: Array.from(assets.media),
+      favicons: Array.from(assets.favicons)
+    }
+  };
 }

@@ -5,7 +5,11 @@ import ApiUsageLog from '@/models/ApiUsageLog';
 const COBALT_INSTANCES = [
   'https://api.cobalt.liubquanti.click',
   'https://cobaltapi.cjs.nz',
-  'https://cobaltapi.kittycat.boo'
+  'https://cobaltapi.kittycat.boo',
+  'https://cobalt.moe/api',
+  'https://cobalt.drgns.space',
+  'https://cobalt.k6.vc',
+  'https://cobalt.sh1nypanda.com'
 ];
 
 function sanitizeUrl(urlStr: string): string {
