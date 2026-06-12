@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import puppeteer from 'puppeteer';
 import fs from 'fs';
+import { connectToDatabase } from '@/lib/db';
+import ApiUsageLog from '@/models/ApiUsageLog';
 
 function getExecutablePath(): string | undefined {
   const paths = [
@@ -17,9 +19,25 @@ function getExecutablePath(): string | undefined {
 
 export async function POST(request: NextRequest) {
   let browser: any = null;
+  let ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '127.0.0.1';
+  if (ip.includes(',')) {
+    ip = ip.split(',')[0].trim();
+  }
+
+  try {
+    await connectToDatabase();
+  } catch (dbErr) {
+    console.error('Database connection failed:', dbErr);
+  }
+
+  let targetUrl = 'Unknown';
+  let screenshotDevice = 'desktop';
+
   try {
     const body = await request.json();
     const { url, device = 'desktop' } = body;
+    targetUrl = url || targetUrl;
+    screenshotDevice = device || screenshotDevice;
 
     if (!url) {
       return NextResponse.json({ success: false, error: 'URL parameter is required' }, { status: 400 });
@@ -46,6 +64,7 @@ export async function POST(request: NextRequest) {
 
     const execPath = getExecutablePath();
     let screenshotBuffer: Buffer | null = null;
+    let apiUsed = 'Puppeteer Local';
 
     if (execPath) {
       try {
@@ -93,6 +112,7 @@ export async function POST(request: NextRequest) {
     // If local screenshot didn't succeed, trigger Microlink fallback
     if (!screenshotBuffer) {
       console.log(`Using Microlink Screenshot fallback for URL: ${url}`);
+      apiUsed = 'Microlink API';
       const microlinkUrl = `https://api.microlink.io?url=${encodeURIComponent(url)}&screenshot=true&viewport.width=${width}&viewport.height=${height}&viewport.isMobile=${isMobile}`;
       const mRes = await fetch(microlinkUrl, { signal: AbortSignal.timeout(20000) });
       if (!mRes.ok) {
@@ -112,6 +132,17 @@ export async function POST(request: NextRequest) {
 
     const base64Image = `data:image/png;base64,${screenshotBuffer.toString('base64')}`;
 
+    try {
+      await ApiUsageLog.create({
+        ip,
+        action: 'screenshot',
+        url: targetUrl,
+        platform: 'website',
+        apiUsed,
+        status: 'success'
+      });
+    } catch (logErr) {}
+
     return NextResponse.json({
       success: true,
       device,
@@ -120,6 +151,18 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error('Screenshot API error:', error);
+    try {
+      await ApiUsageLog.create({
+        ip,
+        action: 'screenshot',
+        url: targetUrl,
+        platform: 'website',
+        apiUsed: 'Screenshot API',
+        status: 'failed',
+        errorMessage: error.message
+      });
+    } catch (logErr) {}
+
     return NextResponse.json({ 
       success: false, 
       error: error.message || 'Failed to capture screenshot. The site may be blocking automated requests.' 

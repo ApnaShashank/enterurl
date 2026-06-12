@@ -20,9 +20,9 @@ export const metadata: Metadata = {
   authors: [{ name: "EnterURL Team" }],
   icons: {
     icon: [
-      { url: "/icon.svg", type: "image/svg+xml" }
+      { url: "/icon.png", type: "image/png" }
     ],
-    apple: "/icon.svg",
+    apple: "/icon.png",
   },
   openGraph: {
     title: "EnterURL - Advanced Link & Website Intelligence Analyzer",
@@ -31,7 +31,7 @@ export const metadata: Metadata = {
     siteName: "EnterURL",
     images: [
       {
-        url: "/icon.svg",
+        url: "/icon.png",
         width: 512,
         height: 512,
         alt: "EnterURL Logo",
@@ -44,7 +44,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "EnterURL - Advanced Link & Website Intelligence Analyzer",
     description: "Analyze any link, inspect SSL certificates, scan tech stacks, and generate screenshots instantly.",
-    images: ["/icon.svg"],
+    images: ["/icon.png"],
   },
 };
 

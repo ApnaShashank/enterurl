@@ -750,7 +750,13 @@ export default function Home() {
     window.open(proxyUrl, '_blank');
   };
 
-  const handleRealVideoDownload = async (downloadUrl: string, downloadMode: 'video' | 'audio', title?: string) => {
+  const handleRealVideoDownload = async (
+    downloadUrl: string, 
+    downloadMode: 'video' | 'audio', 
+    title?: string,
+    videoQuality?: string,
+    audioBitrate?: string
+  ) => {
     if (downloadMode === 'audio') {
       setIsDownloadingAudioFile(true);
       setAudioDownloadProgress(10);
@@ -773,7 +779,12 @@ export default function Home() {
       const res = await fetch('/api/download-media', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: downloadUrl, downloadMode })
+        body: JSON.stringify({ 
+          url: downloadUrl, 
+          downloadMode,
+          videoQuality,
+          audioBitrate
+        })
       });
 
       if (downloadMode === 'audio') {
@@ -815,12 +826,22 @@ export default function Home() {
 
     } catch (err: any) {
       console.error(err);
+      
+      let friendlyError = err.message;
+      if (err.message.includes('error.api.content.video.unavailable')) {
+        friendlyError = 'This video is unavailable (private, age-restricted, region-blocked, or deleted). The extraction server is unable to fetch it.';
+      } else if (err.message.includes('error.api.link.unsupported')) {
+        friendlyError = 'This link format or platform is not supported by the extraction service.';
+      } else if (err.message.includes('Status 400') || err.message.includes('400')) {
+        friendlyError = 'Extraction failed. The video might be restricted or blocked by YouTube/platform.';
+      }
+
       if (downloadMode === 'audio') {
         setIsDownloadingAudioFile(false);
-        alert(`Audio download failed: ${err.message}`);
+        alert(`Audio download failed: ${friendlyError}`);
       } else {
         setIsDownloadingVideo(false);
-        alert(`Video download failed: ${err.message}`);
+        alert(`Video download failed: ${friendlyError}`);
       }
     }
   };
@@ -1492,13 +1513,35 @@ export default function Home() {
                             </button>
                           )
                         ) : (
-                          <button
-                            onClick={() => handleRealVideoDownload(result.url, 'video', result.title)}
-                            className="w-full py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
-                          >
-                            <Download size={15} />
-                            <span>Download Full Video</span>
-                          </button>
+                          <div className="flex gap-2 w-full">
+                            <button
+                              onClick={() => handleRealVideoDownload(result.url, 'video', result.title, selectedVideoQuality)}
+                              className="flex-grow py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+                            >
+                              <Download size={15} />
+                              <span>Download Full Video</span>
+                            </button>
+                            <div className="relative shrink-0 w-32">
+                              <select
+                                value={selectedVideoQuality}
+                                onChange={(e) => setSelectedVideoQuality(e.target.value)}
+                                className="w-full h-full pl-3 pr-8 py-3.5 bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 text-zinc-800 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-zinc-400 cursor-pointer appearance-none"
+                              >
+                                <option value="max">Max Quality</option>
+                                <option value="2160">2160p (4K)</option>
+                                <option value="1440">1440p (2K)</option>
+                                <option value="1080">1080p (HD)</option>
+                                <option value="720">720p (HD)</option>
+                                <option value="480">480p</option>
+                                <option value="360">360p</option>
+                                <option value="240">240p</option>
+                                <option value="144">144p</option>
+                              </select>
+                              <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-zinc-500">
+                                <ArrowDown size={14} />
+                              </div>
+                            </div>
+                          </div>
                         )}
 
                         {/* Extra youtube/tiktok button */}
@@ -1610,26 +1653,62 @@ export default function Home() {
                       </div>
                     ) : (
                       <>
-                        <div className="bg-zinc-50 border border-zinc-100 rounded-xl p-6 flex flex-col items-center gap-4 relative overflow-hidden">
-                          <div className="flex items-end gap-1.5 h-10 w-full justify-center select-none opacity-40">
-                            <div className="w-1.5 bg-zinc-400 rounded-full h-3 animate-[pulse_1s_infinite_100ms]"></div>
-                            <div className="w-1.5 bg-zinc-400 rounded-full h-8 animate-[pulse_1s_infinite_300ms]"></div>
-                            <div className="w-1.5 bg-zinc-400 rounded-full h-5 animate-[pulse_1s_infinite_500ms]"></div>
-                            <div className="w-1.5 bg-zinc-400 rounded-full h-7 animate-[pulse_1s_infinite_200ms]"></div>
-                            <div className="w-1.5 bg-zinc-400 rounded-full h-4 animate-[pulse_1s_infinite_400ms]"></div>
-                            <div className="w-1.5 bg-zinc-400 rounded-full h-8 animate-[pulse_1s_infinite_700ms]"></div>
-                            <div className="w-1.5 bg-zinc-400 rounded-full h-6 animate-[pulse_1s_infinite_600ms]"></div>
-                            <div className="w-1.5 bg-zinc-400 rounded-full h-3 animate-[pulse_1s_infinite_100ms]"></div>
+                        {(result.contentType === 'video' || result.embedUrl) ? (
+                          // Real video preview for audio extraction sources
+                          result.embedUrl ? (
+                            <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-black shadow-inner border border-zinc-100">
+                              <iframe
+                                src={result.embedUrl}
+                                className="absolute inset-0 w-full h-full border-0"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                allowFullScreen
+                                title="Media Preview Embed"
+                              ></iframe>
+                            </div>
+                          ) : result.mediaUrls && result.mediaUrls.length > 0 ? (
+                            <div className="relative w-full rounded-xl overflow-hidden bg-black border border-zinc-100 shadow-inner">
+                              <video 
+                                src={result.mediaUrls[0]} 
+                                controls 
+                                className="w-full max-h-[360px] object-contain"
+                                poster={result.previewUrl}
+                              />
+                            </div>
+                          ) : result.previewUrl ? (
+                            <div className="relative w-full rounded-xl overflow-hidden bg-zinc-50 border border-zinc-100/80 flex justify-center items-center max-h-[380px] p-2">
+                              <img 
+                                src={result.previewUrl} 
+                                alt={result.title}
+                                className="w-full h-auto max-h-[360px] object-contain rounded-lg"
+                              />
+                            </div>
+                          ) : (
+                            <div className="w-full py-8 text-center text-zinc-400 text-xs font-light">
+                              Video preview not supported. Use the button below to extract audio.
+                            </div>
+                          )
+                        ) : (
+                          // Original audio player for direct audio links
+                          <div className="bg-zinc-50 border border-zinc-100 rounded-xl p-6 flex flex-col items-center gap-4 relative overflow-hidden">
+                            <div className="flex items-end gap-1.5 h-10 w-full justify-center select-none opacity-40">
+                              <div className="w-1.5 bg-zinc-400 rounded-full h-3 animate-[pulse_1s_infinite_100ms]"></div>
+                              <div className="w-1.5 bg-zinc-400 rounded-full h-8 animate-[pulse_1s_infinite_300ms]"></div>
+                              <div className="w-1.5 bg-zinc-400 rounded-full h-5 animate-[pulse_1s_infinite_500ms]"></div>
+                              <div className="w-1.5 bg-zinc-400 rounded-full h-7 animate-[pulse_1s_infinite_200ms]"></div>
+                              <div className="w-1.5 bg-zinc-400 rounded-full h-4 animate-[pulse_1s_infinite_400ms]"></div>
+                              <div className="w-1.5 bg-zinc-400 rounded-full h-8 animate-[pulse_1s_infinite_700ms]"></div>
+                              <div className="w-1.5 bg-zinc-400 rounded-full h-6 animate-[pulse_1s_infinite_600ms]"></div>
+                              <div className="w-1.5 bg-zinc-400 rounded-full h-3 animate-[pulse_1s_infinite_100ms]"></div>
+                            </div>
+                            
+                            <audio 
+                              src={result.url} 
+                              controls 
+                              onTimeUpdate={(e) => setAudioCurrentTime(e.currentTarget.currentTime * 1000)}
+                              className="w-full animate-fade-in" 
+                            />
                           </div>
-                          
-                          {/* Play working beat if simulated extraction, otherwise original audio URL */}
-                          <audio 
-                            src={(result.contentType === 'video' || result.embedUrl) ? 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' : result.url} 
-                            controls 
-                            onTimeUpdate={(e) => setAudioCurrentTime(e.currentTarget.currentTime * 1000)}
-                            className="w-full animate-fade-in" 
-                          />
-                        </div>
+                        )}
 
                         <div>
                           <h3 className="text-base font-semibold text-zinc-800 leading-snug line-clamp-1">
@@ -1654,22 +1733,41 @@ export default function Home() {
                             <div className="text-[9px] font-mono text-zinc-400">{audioDownloadProgress}%</div>
                           </div>
                         ) : (
-                          <button
-                            onClick={() => {
-                              if (result.platform === 'youtube' || result.platform === 'instagram' || result.platform === 'tiktok') {
-                                handleRealVideoDownload(result.url, 'audio', result.title);
-                              } else {
-                                handleDownload(
-                                  (result.contentType === 'video' || result.embedUrl) ? 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' : result.url,
-                                  result.title + '_audio'
-                                );
-                              }
-                            }}
-                            className="w-full py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
-                          >
-                            <Download size={15} />
-                            <span>Download Audio file</span>
-                          </button>
+                          <div className="flex gap-2 w-full">
+                            <button
+                              onClick={() => {
+                                if (result.platform === 'youtube' || result.platform === 'instagram' || result.platform === 'tiktok') {
+                                  handleRealVideoDownload(result.url, 'audio', result.title, undefined, selectedAudioQuality);
+                                } else {
+                                  handleDownload(
+                                    (result.contentType === 'video' || result.embedUrl) ? 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' : result.url,
+                                    result.title + '_audio'
+                                  );
+                                }
+                              }}
+                              className="flex-grow py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+                            >
+                              <Download size={15} />
+                              <span>Download Audio file</span>
+                            </button>
+                            <div className="relative shrink-0 w-32">
+                              <select
+                                value={selectedAudioQuality}
+                                onChange={(e) => setSelectedAudioQuality(e.target.value)}
+                                className="w-full h-full pl-3 pr-8 py-3.5 bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 text-zinc-800 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-zinc-400 cursor-pointer appearance-none"
+                              >
+                                <option value="320">320 kbps</option>
+                                <option value="256">256 kbps</option>
+                                <option value="128">128 kbps</option>
+                                <option value="96">96 kbps</option>
+                                <option value="64">64 kbps</option>
+                                <option value="8">8 kbps</option>
+                              </select>
+                              <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-zinc-500">
+                                <ArrowDown size={14} />
+                              </div>
+                            </div>
+                          </div>
                         )}
 
                         {/* Synced AI Audio Transcription (AssemblyAI) */}

@@ -1,8 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { connectToDatabase } from '@/lib/db';
+import ApiUsageLog from '@/models/ApiUsageLog';
 
 const REMOVE_BG_API_KEY = process.env.REMOVE_BG_API_KEY || '';
 
 export async function POST(request: NextRequest) {
+  let ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '127.0.0.1';
+  if (ip.includes(',')) {
+    ip = ip.split(',')[0].trim();
+  }
+
+  try {
+    await connectToDatabase();
+  } catch (dbErr) {
+    console.error('Database connection failed:', dbErr);
+  }
+
+  let targetImageUrl = 'Unknown';
+
   try {
     if (!REMOVE_BG_API_KEY) {
       return NextResponse.json({ success: false, error: 'Remove.bg API key not configured' }, { status: 500 });
@@ -10,6 +25,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const { imageUrl } = body;
+    targetImageUrl = imageUrl || targetImageUrl;
 
     if (!imageUrl) {
       return NextResponse.json({ success: false, error: 'imageUrl is required' }, { status: 400 });
@@ -34,6 +50,18 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Remove.bg error:', response.status, errorText);
+      try {
+        await ApiUsageLog.create({
+          ip,
+          action: 'remove-bg',
+          url: targetImageUrl,
+          platform: 'image',
+          apiUsed: 'Remove.bg',
+          status: 'failed',
+          errorMessage: `Status ${response.status}: ${response.statusText}`
+        });
+      } catch (logErr) {}
+
       return NextResponse.json({ success: false, error: `Remove.bg API error: ${response.statusText}` }, { status: response.status });
     }
 
@@ -46,6 +74,17 @@ export async function POST(request: NextRequest) {
     const creditsCharged = response.headers.get('X-Credits-Charged') || '1';
     const creditsFreeRemaining = response.headers.get('X-Free-Calls') || 'Unknown';
 
+    try {
+      await ApiUsageLog.create({
+        ip,
+        action: 'remove-bg',
+        url: targetImageUrl,
+        platform: 'image',
+        apiUsed: 'Remove.bg',
+        status: 'success'
+      });
+    } catch (logErr) {}
+
     return NextResponse.json({
       success: true,
       imageDataUrl: dataUrl,
@@ -55,6 +94,17 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error('Remove.bg route error:', error);
+    try {
+      await ApiUsageLog.create({
+        ip,
+        action: 'remove-bg',
+        url: targetImageUrl,
+        platform: 'image',
+        apiUsed: 'Remove.bg',
+        status: 'failed',
+        errorMessage: error.message
+      });
+    } catch (logErr) {}
     return NextResponse.json({ success: false, error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

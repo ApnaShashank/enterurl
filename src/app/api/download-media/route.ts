@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { connectToDatabase } from '@/lib/db';
+import ApiUsageLog from '@/models/ApiUsageLog';
 
 const COBALT_INSTANCES = [
   'https://api.cobalt.liubquanti.click',
@@ -17,9 +19,25 @@ function sanitizeUrl(urlStr: string): string {
 }
 
 export async function POST(request: NextRequest) {
+  let ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '127.0.0.1';
+  if (ip.includes(',')) {
+    ip = ip.split(',')[0].trim();
+  }
+
+  try {
+    await connectToDatabase();
+  } catch (dbErr) {
+    console.error('Database connection failed:', dbErr);
+  }
+
+  let requestUrl = 'Unknown';
+  let requestMode = 'video';
+
   try {
     const body = await request.json();
     const { url, downloadMode = 'video', videoQuality, audioBitrate } = body;
+    requestUrl = url || requestUrl;
+    requestMode = downloadMode || requestMode;
 
     if (!url) {
       return NextResponse.json({ success: false, error: 'URL parameter is required' }, { status: 400 });
@@ -61,8 +79,12 @@ export async function POST(request: NextRequest) {
           signal: AbortSignal.timeout(10000) // 10s timeout per instance
         });
 
-        if (res.ok) {
-          const data = await res.json();
+        let data: any = null;
+        try {
+          data = await res.json();
+        } catch {}
+
+        if (res.ok && data) {
           if (data.url) {
             resolvedUrl = data.url;
             filename = data.filename || filename;
@@ -71,7 +93,11 @@ export async function POST(request: NextRequest) {
             lastError = data.error.code || 'Unknown cobalt error';
           }
         } else {
-          lastError = `Status ${res.status}`;
+          if (data && data.error && data.error.code) {
+            lastError = data.error.code;
+          } else {
+            lastError = `Status ${res.status}`;
+          }
         }
       } catch (err: any) {
         console.error(`Error on cobalt instance ${baseInstanceUrl}:`, err.message);
@@ -80,11 +106,38 @@ export async function POST(request: NextRequest) {
     }
 
     if (resolvedUrl) {
+      try {
+        await ApiUsageLog.create({
+          ip,
+          action: `download-${downloadMode}`,
+          url: sanitizedUrl,
+          platform: 'youtube',
+          apiUsed: 'Cobalt',
+          status: 'success'
+        });
+      } catch (logErr) {
+        console.error('Logging download success failed:', logErr);
+      }
+
       return NextResponse.json({
         success: true,
         downloadUrl: resolvedUrl,
         filename
       });
+    }
+
+    try {
+      await ApiUsageLog.create({
+        ip,
+        action: `download-${downloadMode}`,
+        url: sanitizedUrl,
+        platform: 'youtube',
+        apiUsed: 'Cobalt',
+        status: 'failed',
+        errorMessage: lastError
+      });
+    } catch (logErr) {
+      console.error('Logging download failure failed:', logErr);
     }
 
     return NextResponse.json({ 
@@ -94,6 +147,17 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error('Download media API error:', error);
+    try {
+      await ApiUsageLog.create({
+        ip,
+        action: `download-${requestMode}`,
+        url: requestUrl,
+        platform: 'youtube',
+        apiUsed: 'Cobalt',
+        status: 'failed',
+        errorMessage: error.message
+      });
+    } catch (logErr) {}
     return NextResponse.json({ success: false, error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

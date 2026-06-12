@@ -3,6 +3,8 @@ import * as cheerio from 'cheerio';
 import dns from 'dns';
 import tls from 'tls';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { connectToDatabase } from '@/lib/db';
+import ApiUsageLog from '@/models/ApiUsageLog';
 
 const WHOISXML_API_KEY = process.env.WHOISXML_API_KEY || '';
 const IPINFO_TOKEN = process.env.IPINFO_TOKEN || '';
@@ -18,6 +20,10 @@ function getHostname(urlStr: string): string {
 function cleanUrl(urlStr: string): string {
   let c = urlStr.trim();
   if (!/^https?:\/\//i.test(c)) c = 'https://' + c;
+  // If the URL has query parameters with '&' but is missing the starting '?' operator, replace the first '&' with '?'
+  if (c.includes('&') && !c.includes('?')) {
+    c = c.replace('&', '?');
+  }
   return c;
 }
 
@@ -457,15 +463,86 @@ JSON format (no markdown, pure JSON):
 }
 
 export async function POST(request: NextRequest) {
-
   let htmlText = '';
   let $: cheerio.CheerioAPI = cheerio.load('');
+  
+  let rawUrl = '';
+  let scanType = 'base';
+  let ip = '127.0.0.1';
+
   try {
     const body = await request.json();
-    const rawUrl = body.url;
-    const scanType = body.scanType || 'base';
+    rawUrl = body.url || '';
+    scanType = body.scanType || 'base';
+  } catch (err) {
+    console.error('Failed to parse request body:', err);
+  }
+
+  // Connect to database
+  try {
+    await connectToDatabase();
+  } catch (dbErr) {
+    console.error('Database connection failed:', dbErr);
+  }
+
+  try {
+    const headerIp = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip');
+    if (headerIp) {
+      ip = headerIp.includes(',') ? headerIp.split(',')[0].trim() : headerIp.trim();
+    }
+  } catch {}
+
+  const sendResponse = async (data: any, status: number = 200) => {
+    try {
+      const isSuccess = data.success !== false;
+      let apis: string[] = [];
+      if (isSuccess) {
+        if (scanType === 'intel') {
+          if (process.env.WHOISXML_API_KEY) apis.push('WhoisXML');
+          if (process.env.IPINFO_TOKEN) apis.push('IPInfo');
+          if (process.env.VIRUSTOTAL_API_KEY) apis.push('VirusTotal');
+        } else if (scanType === 'ai-research' || scanType === 'ai-writer') {
+          if (process.env.GEMINI_API_KEY) apis.push('Gemini');
+        }
+      }
+      await ApiUsageLog.create({
+        ip,
+        action: `analyze-${scanType}`,
+        url: rawUrl || 'Unknown URL',
+        platform: data.platform || 'website',
+        apiUsed: apis.join(', '),
+        status: isSuccess ? 'success' : 'failed',
+        errorMessage: isSuccess ? undefined : (data.error || 'Unknown error')
+      });
+    } catch (logErr) {
+      console.error('MongoDB Logging failed:', logErr);
+    }
+    return NextResponse.json(data, { status });
+  };
+
+  try {
     if (!rawUrl || typeof rawUrl !== 'string') {
-      return NextResponse.json({ success: false, error: 'URL is required' }, { status: 400 });
+      return await sendResponse({ success: false, error: 'URL is required' }, 400);
+    }
+
+    // Enforce 10 links per 24 hours rate limit
+    if (scanType === 'base' || !scanType) {
+      const startOf24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      try {
+        const count = await ApiUsageLog.countDocuments({
+          ip,
+          action: 'analyze-base',
+          timestamp: { $gte: startOf24h }
+        });
+        if (count >= 10) {
+          return await sendResponse({
+            success: false,
+            error: 'Daily limit of 10 link detections reached. Please try again tomorrow.'
+          }, 429);
+        }
+      } catch (limitErr) {
+        console.error('Rate limit query failed:', limitErr);
+      }
     }
 
     const url = cleanUrl(rawUrl);
@@ -522,7 +599,7 @@ export async function POST(request: NextRequest) {
         const ssl = sslR.status === 'fulfilled' ? sslR.value : null;
         const robots = robotsR.status === 'fulfilled' ? robotsR.value : null;
         const vt = vtR.status === 'fulfilled' ? vtR.value : null;
-        return NextResponse.json({
+        return await sendResponse({
           success: true,
           sslCertificate: ssl,
           robotsTxt: robots,
@@ -554,7 +631,7 @@ export async function POST(request: NextRequest) {
 
       if (scanType === 'lighthouse') {
         const auditData = runLighthouseAudit(htmlTextContent, responseHeadersObj, cheerioInstance);
-        return NextResponse.json({
+        return await sendResponse({
           success: true,
           lighthouseAudit: auditData
         });
@@ -565,7 +642,7 @@ export async function POST(request: NextRequest) {
         const parsedTitle = getMeta(['og:title', 'twitter:title']) || cheerioInstance('title').text()?.trim() || finalDomain;
         const parsedDesc = getMeta(['og:description', 'twitter:description', 'description']) || 'No description available.';
         const geminiIntel = await fetchGeminiIntelligence(parsedTitle, parsedDesc, htmlTextContent, finalDomain);
-        return NextResponse.json({
+        return await sendResponse({
           success: true,
           geminiResearch: geminiIntel
         });
@@ -574,7 +651,7 @@ export async function POST(request: NextRequest) {
 
     if (scanType === 'image-tools') {
       const imgAnalysis = await analyzeImageGemini(url);
-      return NextResponse.json({
+      return await sendResponse({
         success: true,
         imageAnalysis: imgAnalysis
       });
@@ -613,15 +690,15 @@ export async function POST(request: NextRequest) {
       // Detect if the actual content type is a direct media file
       if (contentTypeHeader.startsWith('image/') && !isDirectImage) {
         const filename = finalUrl.split('/').pop()?.split('?')[0] || 'image.file';
-        return buildDirectMediaResponse(finalUrl, getDomainName(finalUrl), 'direct-image', 'image', filename, finalUrl, redirectChain, responseHeadersObj);
+        return buildDirectMediaResponse(finalUrl, getDomainName(finalUrl), 'direct-image', 'image', filename, finalUrl, redirectChain, responseHeadersObj, ip, scanType);
       }
       if (contentTypeHeader.startsWith('video/') && !isDirectVideo) {
         const filename = finalUrl.split('/').pop()?.split('?')[0] || 'video.file';
-        return buildDirectMediaResponse(finalUrl, getDomainName(finalUrl), 'direct-video', 'video', filename, null, redirectChain, responseHeadersObj);
+        return buildDirectMediaResponse(finalUrl, getDomainName(finalUrl), 'direct-video', 'video', filename, null, redirectChain, responseHeadersObj, ip, scanType);
       }
       if (contentTypeHeader.startsWith('audio/') && !isDirectAudio) {
         const filename = finalUrl.split('/').pop()?.split('?')[0] || 'audio.file';
-        return buildDirectMediaResponse(finalUrl, getDomainName(finalUrl), 'direct-audio', 'audio', filename, null, redirectChain, responseHeadersObj);
+        return buildDirectMediaResponse(finalUrl, getDomainName(finalUrl), 'direct-audio', 'audio', filename, null, redirectChain, responseHeadersObj, ip, scanType);
       }
     } catch (e) { console.error('Redirect follow failed:', e); }
 
@@ -648,13 +725,13 @@ export async function POST(request: NextRequest) {
 
       if (scanType === 'ai-writer') {
         const aiData = await generateAiContentGemini(filename, `Direct ${contentType} file`, platform, finalDomain) || generateAiTemplate(filename, `Direct ${contentType} file`, platform);
-        return NextResponse.json({
+        return await sendResponse({
           success: true,
           aiSuggestions: aiData
         });
       }
 
-      return NextResponse.json({
+      return await sendResponse({
         success: true, url: finalUrl, domain: finalDomain, platform, contentType, title: filename,
         previewUrl: previewUrl || '',
         mediaUrls: [finalUrl],
@@ -666,13 +743,13 @@ export async function POST(request: NextRequest) {
     if (/(youtube\.com|youtu\.be)/i.test(originalDomain) || /(youtube\.com|youtu\.be)/i.test(finalDomain)) {
       try {
         let videoId = '';
-        if (url.includes('youtu.be/')) videoId = url.split('youtu.be/')[1]?.split(/[?#]/)[0] || '';
-        else if (url.includes('youtube.com/shorts/')) videoId = url.split('youtube.com/shorts/')[1]?.split(/[?#]/)[0] || '';
+        if (url.includes('youtu.be/')) videoId = url.split('youtu.be/')[1]?.split(/[?#&]/)[0] || '';
+        else if (url.includes('youtube.com/shorts/')) videoId = url.split('youtube.com/shorts/')[1]?.split(/[?#&]/)[0] || '';
         else { try { videoId = new URL(url).searchParams.get('v') || ''; } catch {} }
 
         if (!videoId) {
-          if (finalUrl.includes('youtu.be/')) videoId = finalUrl.split('youtu.be/')[1]?.split(/[?#]/)[0] || '';
-          else if (finalUrl.includes('youtube.com/shorts/')) videoId = finalUrl.split('youtube.com/shorts/')[1]?.split(/[?#]/)[0] || '';
+          if (finalUrl.includes('youtu.be/')) videoId = finalUrl.split('youtu.be/')[1]?.split(/[?#&]/)[0] || '';
+          else if (finalUrl.includes('youtube.com/shorts/')) videoId = finalUrl.split('youtube.com/shorts/')[1]?.split(/[?#&]/)[0] || '';
           else { try { videoId = new URL(finalUrl).searchParams.get('v') || ''; } catch {} }
         }
 
@@ -715,13 +792,13 @@ export async function POST(request: NextRequest) {
 
         if (scanType === 'ai-writer') {
           const aiData = await generateAiContentGemini(title, description, 'YouTube', 'youtube.com') || generateAiTemplate(title, description, 'YouTube');
-          return NextResponse.json({
+          return await sendResponse({
             success: true,
             aiSuggestions: aiData
           });
         }
 
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'youtube', contentType: videoId ? 'video' : 'website',
           title, description, previewUrl, embedUrl: embedUrl || undefined, author, duration,
           mediaUrls: previewUrl ? [previewUrl] : [],
@@ -729,7 +806,7 @@ export async function POST(request: NextRequest) {
         });
       } catch (err) {
         console.error('YouTube handler error:', err);
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'youtube', contentType: 'video',
           title: 'YouTube Video', description: 'YouTube video content.', previewUrl: '',
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
@@ -752,13 +829,13 @@ export async function POST(request: NextRequest) {
         }
         if (scanType === 'ai-writer') {
           const aiData = await generateAiContentGemini(title, description, 'Vimeo', 'vimeo.com') || generateAiTemplate(title, description, 'Vimeo');
-          return NextResponse.json({
+          return await sendResponse({
             success: true,
             aiSuggestions: aiData
           });
         }
 
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'vimeo', contentType: 'video',
           title, description, previewUrl, embedUrl: embedUrl || undefined, author, duration,
           mediaUrls: previewUrl ? [previewUrl] : [],
@@ -766,7 +843,7 @@ export async function POST(request: NextRequest) {
         });
       } catch (err) {
         console.error('Vimeo handler error:', err);
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'vimeo', contentType: 'video',
           title: 'Vimeo Video', description: 'Vimeo content.', previewUrl: '',
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
@@ -813,20 +890,20 @@ export async function POST(request: NextRequest) {
 
         if (scanType === 'ai-writer') {
           const aiData = await generateAiContentGemini(title, desc, 'Reddit', 'reddit.com') || generateAiTemplate(title, desc, 'Reddit');
-          return NextResponse.json({
+          return await sendResponse({
             success: true,
             aiSuggestions: aiData
           });
         }
 
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'reddit', contentType,
           title, description: desc, previewUrl, author, mediaUrls,
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
         console.error('Reddit handler error:', err);
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'reddit', contentType: 'website',
           title: 'Reddit Post', description: 'Reddit post content.', previewUrl: '',
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
@@ -846,13 +923,13 @@ export async function POST(request: NextRequest) {
 
         if (scanType === 'ai-writer') {
           const aiData = await generateAiContentGemini(title, 'TikTok short video', 'TikTok', 'tiktok.com') || generateAiTemplate(title, 'TikTok short video', 'TikTok');
-          return NextResponse.json({
+          return await sendResponse({
             success: true,
             aiSuggestions: aiData
           });
         }
 
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'tiktok', contentType: 'video',
           title, description: `TikTok video by @${author}`, previewUrl, embedUrl, author,
           mediaUrls: previewUrl ? [previewUrl] : [],
@@ -860,7 +937,7 @@ export async function POST(request: NextRequest) {
         });
       } catch (err) {
         console.error('TikTok handler error:', err);
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'tiktok', contentType: 'video',
           title: 'TikTok Content', description: 'TikTok video post.', previewUrl: '',
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
@@ -878,13 +955,13 @@ export async function POST(request: NextRequest) {
 
         if (scanType === 'ai-writer') {
           const aiData = await generateAiContentGemini(title, 'Instagram media post', 'Instagram', 'instagram.com') || generateAiTemplate(title, 'Instagram media post', 'Instagram');
-          return NextResponse.json({
+          return await sendResponse({
             success: true,
             aiSuggestions: aiData
           });
         }
 
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'instagram', contentType: 'video',
           title, description: 'View this content on Instagram.', previewUrl: '',
           embedUrl: code ? `https://www.instagram.com/p/${code}/embed/captioned/` : undefined,
@@ -893,7 +970,7 @@ export async function POST(request: NextRequest) {
         });
       } catch (err) {
         console.error('Instagram handler error:', err);
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'instagram', contentType: 'video',
           title: 'Instagram Post', description: 'Instagram media content.', previewUrl: '',
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
@@ -912,20 +989,20 @@ export async function POST(request: NextRequest) {
 
         if (scanType === 'ai-writer') {
           const aiData = await generateAiContentGemini(title, 'Twitter/X post', 'Twitter', 'twitter.com') || generateAiTemplate(title, 'Twitter/X post', 'Twitter');
-          return NextResponse.json({
+          return await sendResponse({
             success: true,
             aiSuggestions: aiData
           });
         }
 
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'twitter', contentType: embedUrl ? 'video' : 'website',
           title, description: 'Read this post on Twitter / X.', previewUrl: '', embedUrl, mediaUrls: [],
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
         console.error('Twitter/X handler error:', err);
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'twitter', contentType: 'website',
           title: 'Twitter / X Post', description: 'Twitter/X post content.', previewUrl: '',
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
@@ -943,20 +1020,20 @@ export async function POST(request: NextRequest) {
 
         if (scanType === 'ai-writer') {
           const aiData = await generateAiContentGemini(title, 'Facebook media content', 'Facebook', 'facebook.com') || generateAiTemplate(title, 'Facebook content', 'Facebook');
-          return NextResponse.json({
+          return await sendResponse({
             success: true,
             aiSuggestions: aiData
           });
         }
 
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'facebook', contentType: isFbVideo ? 'video' : 'website',
           title, description: 'View this post on Facebook.', previewUrl: '', embedUrl, mediaUrls: [],
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
         console.error('Facebook handler error:', err);
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'facebook', contentType: 'website',
           title: 'Facebook Content', description: 'Facebook post content.', previewUrl: '',
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
@@ -976,20 +1053,20 @@ export async function POST(request: NextRequest) {
 
         if (scanType === 'ai-writer') {
           const aiData = await generateAiContentGemini(title, description, 'Pinterest', 'pinterest.com') || generateAiTemplate(title, description, 'Pinterest');
-          return NextResponse.json({
+          return await sendResponse({
             success: true,
             aiSuggestions: aiData
           });
         }
 
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'pinterest', contentType: 'image',
           title, description, previewUrl, mediaUrls: previewUrl ? [previewUrl] : [],
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
         console.error('Pinterest handler error:', err);
-        return NextResponse.json({
+        return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'pinterest', contentType: 'image',
           title: 'Pinterest Pin', description: 'Pinterest board pin content.', previewUrl: '',
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
@@ -1045,14 +1122,14 @@ export async function POST(request: NextRequest) {
 
     if (scanType === 'ai-writer') {
       const aiData = await generateAiContentGemini(parsedTitle, parsedDesc, 'Website', finalDomain) || { ...generateAiTemplate(parsedTitle, parsedDesc, 'Website'), hashtags };
-      return NextResponse.json({
+      return await sendResponse({
         success: true,
         aiSuggestions: aiData
       });
     }
 
     // Base scan (Skip all heavy APIs)
-    return NextResponse.json({
+    return await sendResponse({
       success: true, url: finalUrl, domain: finalDomain, platform: 'website', contentType,
       title: parsedTitle, description: parsedDesc, previewUrl: ogImage, mediaUrls: ogImage ? [ogImage] : [],
       embedUrl: ogVideo || undefined, author: author || undefined, hashtags,
@@ -1067,12 +1144,35 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error('Analyze API error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Server error' }, { status: 500 });
+    return await sendResponse({ success: false, error: error.message || 'Server error' }, 500);
   }
 }
 
 // Helper for direct media early return
-function buildDirectMediaResponse(url: string, domain: string, platform: string, contentType: string, filename: string, previewUrl: string | null, redirectChain: string[], headers: Record<string, string>) {
+async function buildDirectMediaResponse(
+  url: string,
+  domain: string,
+  platform: string,
+  contentType: string,
+  filename: string,
+  previewUrl: string | null,
+  redirectChain: string[],
+  headers: Record<string, string>,
+  ip: string,
+  scanType: string
+) {
+  try {
+    await ApiUsageLog.create({
+      ip,
+      action: `analyze-${scanType}`,
+      url,
+      platform,
+      status: 'success'
+    });
+  } catch (logErr) {
+    console.error('Direct media logging failed:', logErr);
+  }
+
   return NextResponse.json({
     success: true, url, domain, platform, contentType,
     title: filename, previewUrl: previewUrl || '',

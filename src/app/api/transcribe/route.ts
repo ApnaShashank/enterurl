@@ -1,10 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { connectToDatabase } from '@/lib/db';
+import ApiUsageLog from '@/models/ApiUsageLog';
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY || '';
 const ASSEMBLYAI_BASE = 'https://api.assemblyai.com/v2';
 
 // POST /api/transcribe — submit audio URL for transcription, return transcript_id
 export async function POST(request: NextRequest) {
+  let ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '127.0.0.1';
+  if (ip.includes(',')) {
+    ip = ip.split(',')[0].trim();
+  }
+
+  try {
+    await connectToDatabase();
+  } catch (dbErr) {
+    console.error('Database connection failed:', dbErr);
+  }
+
+  let targetAudioUrl = 'Unknown';
+
   try {
     if (!ASSEMBLYAI_API_KEY) {
       return NextResponse.json({ success: false, error: 'AssemblyAI API key not configured' }, { status: 500 });
@@ -12,6 +27,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const { audioUrl } = body;
+    targetAudioUrl = audioUrl || targetAudioUrl;
 
     if (!audioUrl) {
       return NextResponse.json({ success: false, error: 'audioUrl is required' }, { status: 400 });
@@ -34,14 +50,49 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const err = await response.text();
+      try {
+        await ApiUsageLog.create({
+          ip,
+          action: 'transcribe',
+          url: targetAudioUrl,
+          platform: 'audio',
+          apiUsed: 'AssemblyAI',
+          status: 'failed',
+          errorMessage: `Status ${response.status}: ${err}`
+        });
+      } catch (logErr) {}
+
       return NextResponse.json({ success: false, error: `AssemblyAI submit error: ${err}` }, { status: 500 });
     }
 
     const data = await response.json();
+
+    try {
+      await ApiUsageLog.create({
+        ip,
+        action: 'transcribe',
+        url: targetAudioUrl,
+        platform: 'audio',
+        apiUsed: 'AssemblyAI',
+        status: 'success'
+      });
+    } catch (logErr) {}
+
     return NextResponse.json({ success: true, transcriptId: data.id, status: data.status });
 
   } catch (error: any) {
     console.error('Transcribe submit error:', error);
+    try {
+      await ApiUsageLog.create({
+        ip,
+        action: 'transcribe',
+        url: targetAudioUrl,
+        platform: 'audio',
+        apiUsed: 'AssemblyAI',
+        status: 'failed',
+        errorMessage: error.message
+      });
+    } catch (logErr) {}
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
