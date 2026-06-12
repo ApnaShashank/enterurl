@@ -6,15 +6,26 @@ const COBALT_INSTANCES = [
   'https://cobaltapi.kittycat.boo'
 ];
 
+function sanitizeUrl(urlStr: string): string {
+  let c = urlStr.trim();
+  if (!/^https?:\/\//i.test(c)) c = 'https://' + c;
+  // If the URL has query parameters with '&' but is missing the starting '?' operator, replace the first '&' with '?'
+  if (c.includes('&') && !c.includes('?')) {
+    c = c.replace('&', '?');
+  }
+  return c;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { url, downloadMode = 'video' } = body;
+    const { url, downloadMode = 'video', videoQuality, audioBitrate } = body;
 
     if (!url) {
       return NextResponse.json({ success: false, error: 'URL parameter is required' }, { status: 400 });
     }
 
+    const sanitizedUrl = sanitizeUrl(url);
     let resolvedUrl = null;
     let filename = 'media';
     let lastError = 'No instances responded';
@@ -23,10 +34,21 @@ export async function POST(request: NextRequest) {
     for (const baseInstanceUrl of COBALT_INSTANCES) {
       try {
         const payload: Record<string, any> = {
-          url: url
+          url: sanitizedUrl,
+          filenameStyle: 'basic'
         };
+        
         if (downloadMode === 'audio') {
           payload.downloadMode = 'audio';
+          payload.audioFormat = 'mp3';
+          if (audioBitrate) {
+            payload.audioBitrate = audioBitrate;
+          }
+        } else {
+          payload.downloadMode = 'auto';
+          if (videoQuality) {
+            payload.videoQuality = videoQuality;
+          }
         }
 
         const res = await fetch(baseInstanceUrl, {

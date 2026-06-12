@@ -193,6 +193,10 @@ export default function Home() {
   const [loadedTabs, setLoadedTabs] = useState<Record<string, boolean>>({});
   const [lazyLoadingTab, setLazyLoadingTab] = useState<string | null>(null);
   
+  // Media Download Quality states
+  const [selectedVideoQuality, setSelectedVideoQuality] = useState<string>('480');
+  const [selectedAudioQuality, setSelectedAudioQuality] = useState<string>('128');
+  
   // Audio extraction simulation states
   const [isExtractingAudio, setIsExtractingAudio] = useState(false);
   const [extractionProgress, setExtractionProgress] = useState(0);
