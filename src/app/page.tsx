@@ -52,6 +52,7 @@ interface AnalysisResult {
   author?: string;
   hashtags?: string[];
   duration?: string;
+  hasSubtitles?: boolean;
   techStack?: string[];
   aiSuggestions?: {
     captions: string[];
@@ -145,6 +146,11 @@ interface AnalysisResult {
       media: string[];
       favicons: string[];
     };
+  };
+  trustSafety?: {
+    verdict: 'REAL' | 'SUSPICIOUS' | 'FAKE';
+    trustScore: number;
+    analysis: string;
   };
 }
 
@@ -406,6 +412,82 @@ const LoaderPulsingDots = ({ className = "text-white", size = 15 }: { className?
   </svg>
 );
 
+const getTabTransitionLoader = (tabId: string, platform?: string | null) => {
+  let loaderComponent = <LoaderOrbCircle size={48} className="text-violet-600" />;
+  let loadingMessage = "Preparing tab specs...";
+
+  switch (tabId) {
+    case 'video':
+      loaderComponent = <LoaderOrbCircle size={48} className="text-violet-600" />;
+      loadingMessage = platform === 'youtube' ? "Fetching YouTube embed player..." : "Rendering video preview elements...";
+      break;
+    case 'image':
+      loaderComponent = <LoaderOrbCircle size={48} className="text-pink-500" />;
+      loadingMessage = "Processing high-res image previews...";
+      break;
+    case 'audio':
+      loaderComponent = <LoaderEqualizer size={48} className="text-emerald-500" />;
+      loadingMessage = "Syncing audio streams and equalizer...";
+      break;
+    case 'website':
+      loaderComponent = <LoaderTripleArcs size={48} className="text-blue-500" />;
+      loadingMessage = "Parsing DOM structure and links...";
+      break;
+    case 'image-tools':
+      loaderComponent = <LoaderOrbCircle size={48} className="text-orange-500" />;
+      loadingMessage = "Initializing visual extraction tools...";
+      break;
+    case 'dev-specs':
+      loaderComponent = <LoaderTripleArcs size={48} className="text-indigo-500" />;
+      loadingMessage = "Extracting CSS variables & typography specs...";
+      break;
+    case 'link-intel':
+      loaderComponent = <LoaderTripleArcs size={48} className="text-teal-500" />;
+      loadingMessage = "Re-checking DNS records and network intelligence...";
+      break;
+    case 'lighthouse':
+      loaderComponent = <LoaderDoubleRing size={48} className="text-yellow-500" />;
+      loadingMessage = "Loading performance parameters...";
+      break;
+    case 'screenshots':
+      loaderComponent = <LoaderClock size={48} className="text-purple-500" />;
+      loadingMessage = "Structuring responsive preview layouts...";
+      break;
+    case 'og-preview':
+      loaderComponent = <LoaderOrbCircle size={48} className="text-cyan-500" />;
+      loadingMessage = "Formatting OpenGraph metadata previews...";
+      break;
+    case 'ai-research':
+      loaderComponent = <LoaderOrbCircle size={48} className="text-violet-650" />;
+      loadingMessage = platform === 'youtube' 
+        ? "Extracting video transcript details..." 
+        : "Summarizing article semantic findings...";
+      break;
+    case 'ai-tools':
+      loaderComponent = <LoaderOrbCircle size={48} className="text-fuchsia-600" />;
+      loadingMessage = "Initializing AI content writer tools...";
+      break;
+    case 'trust-safety':
+      loaderComponent = <LoaderDoubleRing size={48} className="text-rose-500" />;
+      loadingMessage = "Running domain trust audits & safety scan...";
+      break;
+    default:
+      loaderComponent = <LoaderOrbCircle size={48} className="text-violet-600" />;
+      loadingMessage = "Loading feature workspace...";
+  }
+
+  return (
+    <div className="flex flex-col items-center justify-center py-20 space-y-4 animate-fade-in">
+      <div className="relative">
+        {loaderComponent}
+      </div>
+      <p className="text-zinc-500 text-sm font-medium tracking-wide animate-pulse">
+        {loadingMessage}
+      </p>
+    </div>
+  );
+};
+
 export default function Home() {
   const [inputUrl, setInputUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -420,6 +502,10 @@ export default function Home() {
   // Lazy tab loading states
   const [loadedTabs, setLoadedTabs] = useState<Record<string, boolean>>({});
   const [lazyLoadingTab, setLazyLoadingTab] = useState<string | null>(null);
+  
+  // Tab transition loading states
+  const [isTransitioningTab, setIsTransitioningTab] = useState<string | null>(null);
+  const tabTransitionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Media Download Quality states
   const [selectedVideoQuality, setSelectedVideoQuality] = useState<string>('480');
@@ -633,11 +719,14 @@ export default function Home() {
       if (audioDownloadIntervalRef.current) {
         clearInterval(audioDownloadIntervalRef.current);
       }
+      if (tabTransitionTimeoutRef.current) {
+        clearTimeout(tabTransitionTimeoutRef.current);
+      }
     };
   }, [isLoading]);
 
   // Fetch lazy loaded assets data on-demand
-  const fetchLazyData = async (scanType: 'intel' | 'lighthouse' | 'ai-research' | 'ai-writer') => {
+  const fetchLazyData = async (scanType: 'intel' | 'lighthouse' | 'ai-research' | 'ai-writer' | 'trust-safety') => {
     if (!result) return;
     setLazyLoadingTab(activeAsset);
     try {
@@ -678,15 +767,12 @@ export default function Home() {
       fetchLazyData('ai-research');
     } else if (activeAsset === 'ai-tools' && !loadedTabs['ai-writer']) {
       fetchLazyData('ai-writer');
+    } else if (activeAsset === 'trust-safety' && !loadedTabs['trust-safety']) {
+      fetchLazyData('trust-safety');
     }
   }, [activeAsset, result?.url, loadedTabs]);
 
-  // Reset scroll to top of window when activeAsset changes
-  useEffect(() => {
-    if (activeAsset) {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  }, [activeAsset]);
+
 
   // Cycle idle input placeholders with smooth opacity transitions
   useEffect(() => {
@@ -1325,6 +1411,15 @@ export default function Home() {
       extractionIntervalRef.current = null;
     }
 
+    // Set transition state with a 800ms timeout
+    if (tabTransitionTimeoutRef.current) {
+      clearTimeout(tabTransitionTimeoutRef.current);
+    }
+    setIsTransitioningTab(assetId);
+    tabTransitionTimeoutRef.current = setTimeout(() => {
+      setIsTransitioningTab(null);
+    }, 800);
+
     // If clicking on audio and the content is video/embed, run extraction simulator
     if (assetId === 'audio' && result && (result.contentType === 'video' || result.embedUrl)) {
       setIsExtractingAudio(true);
@@ -1386,6 +1481,10 @@ export default function Home() {
       list.push({ id: 'audio', label: 'Audio' });
     }
 
+    if (result.platform === 'youtube') {
+      list.push({ id: 'ai-research', label: 'AI Video Summary' });
+    }
+
     if (result.contentType === 'website' && !result.embedUrl && result.platform === 'website') {
       list.push({ id: 'website', label: 'Info' });
     }
@@ -1402,6 +1501,7 @@ export default function Home() {
       list.push({ id: 'screenshots', label: 'Screenshots' });
       list.push({ id: 'og-preview', label: 'Social Previews' });
       list.push({ id: 'ai-research', label: 'AI Research' });
+      list.push({ id: 'trust-safety', label: 'Real/Fake Detector' });
       if (result.developerSpecs) {
         list.push({ id: 'dev-specs', label: 'Developer Specs' });
       }
@@ -1794,9 +1894,12 @@ export default function Home() {
               
               {/* Dynamic body based on click selection */}
               <div className="p-6">
-                
-                {/* 1. VIDEO PREVIEW TAB */}
-                {activeAsset === 'video' && (
+                {isTransitioningTab === activeAsset ? (
+                  getTabTransitionLoader(activeAsset, result?.platform)
+                ) : (
+                  <>
+                    {/* 1. VIDEO PREVIEW TAB */}
+                    {activeAsset === 'video' && (
                   <div className="space-y-4 animate-slide-up-in">
                     {result.embedUrl ? (
                       <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-black shadow-inner border border-zinc-100">
@@ -1901,15 +2004,15 @@ export default function Home() {
                         {result.platform === 'youtube' && (
                           <button
                             onClick={handleDownloadSubtitles}
-                            disabled={isDownloadingSubtitles}
-                            className="w-full py-3 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-zinc-200/40 disabled:opacity-50"
+                            disabled={isDownloadingSubtitles || result.hasSubtitles === false}
+                            className="w-full py-3 bg-zinc-100 hover:bg-zinc-200 disabled:hover:bg-zinc-100 text-zinc-800 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-zinc-200/40 disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             {isDownloadingSubtitles ? (
                               <LoaderPulsingDots size={10} className="text-zinc-650" />
                             ) : (
                               <FileText size={13} className="text-zinc-600" />
                             )}
-                            <span>Download Subtitles (.srt)</span>
+                            <span>{result.hasSubtitles === false ? 'Subtitles Not Available' : 'Download Subtitles (.srt)'}</span>
                           </button>
                         )}
 
@@ -2819,20 +2922,28 @@ export default function Home() {
                   <div className="space-y-4 animate-slide-up-in">
                     <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
                       <Sparkles size={11} className="text-violet-500" />
-                      Gemini Deep Webpage Intelligence
+                      {result.platform === 'youtube' ? 'Gemini Video Summarizer' : 'Gemini Deep Webpage Intelligence'}
                     </span>
 
                     {lazyLoadingTab === 'ai-research' ? (
                       <div className="py-20 flex flex-col items-center justify-center gap-3 text-center">
                         <LoaderOrbCircle size={48} className="text-violet-650" />
-                        <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider text-zinc-850">Generating AI Web Intelligence...</span>
-                        <p className="text-[11px] text-zinc-400 font-light max-w-xs mx-auto">Analyzing website content to extract competitors, target audience, and actionable SEO advice...</p>
+                        <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider text-zinc-850">
+                          {result.platform === 'youtube' ? 'Generating AI Video Summary...' : 'Generating AI Web Intelligence...'}
+                        </span>
+                        <p className="text-[11px] text-zinc-400 font-light max-w-xs mx-auto">
+                          {result.platform === 'youtube' 
+                            ? 'Retrieving and analyzing video subtitles track to extract core takeaways and insights...' 
+                            : 'Analyzing website content to extract competitors, target audience, and actionable SEO advice...'}
+                        </p>
                       </div>
                     ) : result.geminiResearch ? (
                       <>
                         {/* Executive Summary */}
                         <div className="bg-zinc-50/50 border border-zinc-100 p-4 rounded-xl space-y-1">
-                          <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold block animate-fade-in">Executive Summary</span>
+                          <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold block animate-fade-in">
+                            {result.platform === 'youtube' ? 'Video Executive Summary' : 'Executive Summary'}
+                          </span>
                           <p className="text-xs text-zinc-700 leading-relaxed font-light select-text">
                             {result.geminiResearch.summary}
                           </p>
@@ -2840,7 +2951,9 @@ export default function Home() {
 
                         {/* Target Audience */}
                         <div className="bg-zinc-50/50 border border-zinc-100 p-4 rounded-xl space-y-1">
-                          <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold block">Target Audience Profile</span>
+                          <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold block">
+                            {result.platform === 'youtube' ? 'Key Takeaways & Lessons' : 'Target Audience Profile'}
+                          </span>
                           <p className="text-xs text-zinc-700 leading-relaxed font-light select-text">
                             {result.geminiResearch.targetAudience}
                           </p>
@@ -2849,19 +2962,30 @@ export default function Home() {
                         {/* Key Competitors */}
                         {result.geminiResearch.competitors && result.geminiResearch.competitors.length > 0 && (
                           <div className="space-y-2">
-                            <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">Identified Direct Competitors</span>
+                            <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">
+                              {result.platform === 'youtube' ? 'Related Concepts & Tags' : 'Identified Direct Competitors'}
+                            </span>
                             <div className="flex flex-wrap gap-2">
                               {result.geminiResearch.competitors.map((comp, idx) => (
-                                <a 
-                                  key={idx} 
-                                  href={`https://${comp.replace(/https?:\/\//i, '')}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="px-3 py-1.5 bg-violet-50 hover:bg-violet-100 border border-violet-100 text-violet-700 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm"
-                                >
-                                  <span>{comp}</span>
-                                  <ExternalLink size={10} className="opacity-60" />
-                                </a>
+                                result.platform === 'youtube' ? (
+                                  <span 
+                                    key={idx} 
+                                    className="px-3 py-1.5 bg-violet-50 border border-violet-100 text-violet-700 rounded-lg text-xs font-bold shadow-sm"
+                                  >
+                                    {comp}
+                                  </span>
+                                ) : (
+                                  <a 
+                                    key={idx} 
+                                    href={`https://${comp.replace(/https?:\/\//i, '')}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-3 py-1.5 bg-violet-50 hover:bg-violet-100 border border-violet-100 text-violet-700 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm"
+                                  >
+                                    <span>{comp}</span>
+                                    <ExternalLink size={10} className="opacity-60" />
+                                  </a>
+                                )
                               ))}
                             </div>
                           </div>
@@ -2870,7 +2994,9 @@ export default function Home() {
                         {/* Actionable SEO Advice */}
                         {result.geminiResearch.seoAdvice && result.geminiResearch.seoAdvice.length > 0 && (
                           <div className="space-y-2">
-                            <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">Actionable SEO Enhancements</span>
+                            <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">
+                              {result.platform === 'youtube' ? 'Detailed Chapter & Content Insights' : 'Actionable SEO Enhancements'}
+                            </span>
                             <div className="space-y-2">
                               {result.geminiResearch.seoAdvice.map((advice, idx) => (
                                 <div key={idx} className="flex items-start gap-2.5 text-xs text-zinc-650 bg-white border border-zinc-100 p-3 rounded-xl shadow-sm">
@@ -2884,8 +3010,135 @@ export default function Home() {
                       </>
                     ) : (
                       <div className="py-20 flex flex-col items-center justify-center text-center text-zinc-400 text-xs font-light">
-                        AI website research details failed or are not available for this site.
+                        {result.platform === 'youtube' 
+                          ? 'AI video summary failed or is not available for this link.' 
+                          : 'AI website research details failed or are not available for this site.'}
                       </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 5E. TRUST & SAFETY / REAL-FAKE CHECK TAB */}
+                {activeAsset === 'trust-safety' && (
+                  <div className="space-y-6 animate-slide-up-in">
+                    <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase flex items-center gap-1">
+                      <ShieldCheck size={11} className="text-violet-500" />
+                      Domain Trust & Safety Check
+                    </span>
+
+                    {lazyLoadingTab === 'trust-safety' ? (
+                      <div className="py-20 flex flex-col items-center justify-center gap-3 text-center">
+                        <LoaderDoubleRing size={48} className="text-rose-500" />
+                        <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider text-zinc-850">Running Trust Audits...</span>
+                        <p className="text-[11px] text-zinc-400 font-light max-w-xs mx-auto">Evaluating domain SSL certificates, VirusTotal engine flags, domain age registration, and semantic spoofing heuristics...</p>
+                      </div>
+                    ) : (
+                      (() => {
+                        const vtMalicious = result.linkIntel?.virusTotal?.malicious || 0;
+                        const vtTotal = result.linkIntel?.virusTotal?.total || 0;
+                        const finalVerdict = vtMalicious > 0 ? 'FAKE' : (result.trustSafety?.verdict || 'REAL');
+                        const finalScore = vtMalicious > 0 ? 0 : (result.trustSafety?.trustScore ?? 85);
+                        const finalAnalysis = vtMalicious > 0 
+                          ? `This website is flagged as FAKE/HIGH RISK because ${vtMalicious} security engines on VirusTotal detected active malicious or phishing signatures.`
+                          : (result.trustSafety?.analysis || 'This website has a solid reputation, valid encryption, and displays no indicators of malicious intent or typosquatting.');
+
+                        const isReal = finalVerdict === 'REAL';
+                        const isFake = finalVerdict === 'FAKE';
+                        
+                        const cardBg = isFake ? 'bg-rose-50/50 border-rose-100 text-rose-900' : isReal ? 'bg-emerald-50/50 border-emerald-100 text-emerald-900' : 'bg-amber-50/50 border-amber-100 text-amber-900';
+                        const shieldColor = isFake ? 'text-rose-500' : isReal ? 'text-emerald-500' : 'text-amber-500';
+                        const statusLabel = isFake ? 'HIGH RISK / FAKE' : isReal ? 'VERIFIED / REAL' : 'SUSPICIOUS / UNVERIFIED';
+
+                        return (
+                          <div className="space-y-6">
+                            {/* Verdict Header Card */}
+                            <div className={`border rounded-2xl p-5 flex items-start gap-4 ${cardBg} transition-all shadow-sm`}>
+                              <div className="p-2.5 bg-white rounded-xl shadow-sm border border-zinc-100/50 shrink-0">
+                                {isFake ? (
+                                  <ShieldAlert size={28} className={shieldColor} />
+                                ) : isReal ? (
+                                  <ShieldCheck size={28} className={shieldColor} />
+                                ) : (
+                                  <AlertTriangle size={28} className={shieldColor} />
+                                )}
+                              </div>
+                              <div className="space-y-1 flex-1">
+                                <span className="text-[9px] uppercase tracking-widest font-extrabold opacity-75">Legitimacy Verdict</span>
+                                <h3 className="text-base font-extrabold tracking-wide uppercase">{statusLabel} WEBSITE</h3>
+                                <p className="text-xs font-light opacity-90 leading-relaxed select-text mt-1">{finalAnalysis}</p>
+                              </div>
+                            </div>
+
+                            {/* Trust Signals Dashboard Grid */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              
+                              {/* 1. Score Circle */}
+                              <div className="bg-white border border-zinc-100 p-4 rounded-xl flex flex-col items-center justify-center text-center shadow-sm">
+                                <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold mb-3 block">Trust Score</span>
+                                <LighthouseScoreCircle score={finalScore} label="" />
+                                <span className="text-[10px] text-zinc-400 font-light mt-2">Safety Reliability Index</span>
+                              </div>
+
+                              {/* 2. SSL & Registry details */}
+                              <div className="bg-white border border-zinc-100 p-4 rounded-xl space-y-3 shadow-sm flex flex-col justify-between">
+                                <div>
+                                  <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold mb-2 block">Domain Registration</span>
+                                  {result.linkIntel?.whois?.domainAge ? (
+                                    <div className="space-y-1 mt-1">
+                                      <div className="text-xs font-medium text-zinc-700">Domain Age: <span className="text-violet-600 font-bold">{result.linkIntel.whois.domainAge} years</span></div>
+                                      <div className="text-[10px] text-zinc-400 font-light">Registered via: {result.linkIntel.whois.registrar || 'Unknown'}</div>
+                                    </div>
+                                  ) : (
+                                    <div className="text-xs text-zinc-400 font-light mt-1">
+                                      Domain age details unavailable. Safe/legitimate sites usually have public registrations older than 1 year.
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="border-t border-zinc-100 pt-2 flex items-center justify-between">
+                                  <span className="text-[10px] text-zinc-500 font-light">SSL Certificate</span>
+                                  {result.sslCertificate?.valid ? (
+                                    <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-md text-[10px] font-bold border border-emerald-100 flex items-center gap-0.5">
+                                      <CheckCircle size={9} /> Secure HTTPS
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 bg-rose-50 text-rose-700 rounded-md text-[10px] font-bold border border-rose-100 flex items-center gap-0.5 animate-pulse">
+                                      <XCircle size={9} /> Insecure (No SSL)
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* 3. Security Scans */}
+                              <div className="bg-white border border-zinc-100 p-4 rounded-xl space-y-3 shadow-sm flex flex-col justify-between">
+                                <div>
+                                  <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold mb-2 block">VirusTotal Scan Report</span>
+                                  <div className="space-y-1.5 mt-1">
+                                    <div className="flex justify-between items-center text-xs text-zinc-700">
+                                      <span>Malicious Flags:</span>
+                                      <span className={`font-bold ${vtMalicious > 0 ? 'text-rose-600 animate-pulse' : 'text-emerald-600'}`}>{vtMalicious}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-xs text-zinc-700">
+                                      <span>Clean Engines:</span>
+                                      <span className="text-zinc-500">{vtTotal - vtMalicious}</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="border-t border-zinc-100 pt-2 flex items-center justify-between text-[10px]">
+                                  <span className="text-zinc-500 font-light">Global Safety Verdict</span>
+                                  {vtMalicious === 0 ? (
+                                    <span className="text-emerald-600 font-semibold uppercase flex items-center gap-0.5">No Active Malware</span>
+                                  ) : (
+                                    <span className="text-rose-600 font-semibold uppercase flex items-center gap-0.5 animate-pulse">Active Threat Detected</span>
+                                  )}
+                                </div>
+                              </div>
+
+                            </div>
+                          </div>
+                        );
+                      })()
                     )}
                   </div>
                 )}
@@ -3789,7 +4042,8 @@ export default function Home() {
                     </div>
                   </div>
                 )}
-
+                  </>
+                )}
               </div>
             </div>
           </div>

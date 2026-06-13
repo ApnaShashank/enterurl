@@ -75,6 +75,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (!isDirectAudio && resolvedAudioUrl === audioUrl) {
+      return NextResponse.json({
+        success: false,
+        error: 'Failed to extract audio track from this video link. The extraction server may be rate-limited, or all public media download proxies are currently down.'
+      }, { status: 502 });
+    }
+
     // Try Deepgram first if key is configured (faster, synchronous)
     let deepgramSucceeded = false;
     let deepgramResult = null;

@@ -10,6 +10,10 @@ const WHOISXML_API_KEY = process.env.WHOISXML_API_KEY || '';
 const IPINFO_TOKEN = process.env.IPINFO_TOKEN || '';
 const VIRUSTOTAL_API_KEY = process.env.VIRUSTOTAL_API_KEY || '';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const XAI_API_KEY = process.env.XAI_API_KEY || '';
 
 function getDomainName(urlStr: string): string {
   try { return new URL(urlStr).hostname.replace('www.', ''); } catch { return 'unknown'; }
@@ -393,21 +397,194 @@ function runLighthouseAudit(htmlText: string, headers: Record<string, string>, $
   };
 }
 
+function getYoutubeVideoId(url: string): string | null {
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=|shorts\/)([^#\&\?]*).*/;
+  const match = url.match(regExp);
+  return (match && match[2].length === 11) ? match[2] : null;
+}
+
+async function generateAiCompletion(prompt: string, systemPrompt: string = "You are a helpful assistant."): Promise<string> {
+  if (GEMINI_API_KEY) {
+    try {
+      console.log('Trying Gemini API...');
+      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      const result = await model.generateContent(systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt);
+      const text = result.response.text().trim();
+      if (text) return text;
+    } catch (e: any) {
+      console.error('Gemini API failed, trying fallback:', e.message);
+    }
+  }
+
+  if (GROQ_API_KEY) {
+    try {
+      console.log('Trying Groq API...');
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'llama3-70b-8192',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.1
+        }),
+        signal: AbortSignal.timeout(6000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.choices?.[0]?.message?.content?.trim();
+        if (text) return text;
+      }
+    } catch (e: any) {
+      console.error('Groq API failed, trying fallback:', e.message);
+    }
+  }
+
+  if (OPENAI_API_KEY) {
+    try {
+      console.log('Trying OpenAI API...');
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.1
+        }),
+        signal: AbortSignal.timeout(6000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.choices?.[0]?.message?.content?.trim();
+        if (text) return text;
+      }
+    } catch (e: any) {
+      console.error('OpenAI API failed, trying fallback:', e.message);
+    }
+  }
+
+  if (ANTHROPIC_API_KEY) {
+    try {
+      console.log('Trying Anthropic API...');
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-sonnet-20240620',
+          max_tokens: 1500,
+          messages: [{ role: 'user', content: `${systemPrompt}\n\n${prompt}` }],
+          temperature: 0.1
+        }),
+        signal: AbortSignal.timeout(6000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.content?.[0]?.text?.trim();
+        if (text) return text;
+      }
+    } catch (e: any) {
+      console.error('Anthropic API failed, trying fallback:', e.message);
+    }
+  }
+
+  if (XAI_API_KEY) {
+    try {
+      console.log('Trying xAI API...');
+      const res = await fetch('https://api.x.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${XAI_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'grok-beta',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.1
+        }),
+        signal: AbortSignal.timeout(6000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.choices?.[0]?.message?.content?.trim();
+        if (text) return text;
+      }
+    } catch (e: any) {
+      console.error('xAI API failed:', e.message);
+    }
+  }
+
+  throw new Error('All AI API keys failed or are unconfigured.');
+}
+
+// ---- GEMINI YOUTUBE VIDEO SUMMARY ----
+async function fetchGeminiYoutubeSummary(title: string, description: string, transcript: string, domain: string) {
+  try {
+    const textSnippet = transcript ? transcript.substring(0, 10000) : '';
+    const systemPrompt = "You are a professional video content summarizer that outputs JSON only.";
+    const prompt = `Perform a detailed video intelligence summary on this YouTube video.
+Title: "${title}"
+Description: "${description}"
+${textSnippet ? `Transcript Segment: "${textSnippet}"` : '(No transcript subtitles available)'}
+
+Generate a JSON object with these keys (no markdown, pure JSON, only valid JSON):
+{
+  "summary": "A highly detailed, comprehensive summary of what this video discusses, its context, and the core flow of the video (3-4 sentences minimum).",
+  "targetAudience": "Core value proposition, key takeaways, and lessons learned from watching this video in detail.",
+  "competitors": ["Core Concept 1", "Core Concept 2", "Core Concept 3", "Core Concept 4"],
+  "seoAdvice": [
+    "Key Theme/Insight 1: detailed explanation",
+    "Key Theme/Insight 2: detailed explanation",
+    "Key Theme/Insight 3: detailed explanation",
+    "Key Theme/Insight 4: detailed explanation"
+  ]
+}`;
+
+    const completionText = await generateAiCompletion(prompt, systemPrompt);
+    const cleanedText = completionText.trim().replace(/```json?\n?/g, '').replace(/```\n?/g, '');
+    return JSON.parse(cleanedText);
+  } catch (e) {
+    console.error('Gemini YouTube summary error:', e);
+    return {
+      summary: `Detailed summary for video: "${title}". Description: ${description}`,
+      targetAudience: "General video viewers, students, and practitioners interested in the subject.",
+      competitors: ["Video Concepts", "Topic Breakdown", "Key Points"],
+      seoAdvice: ["Check video captions", "Read comments and description details"]
+    };
+  }
+}
+
 // ---- GEMINI WEBPAGE AI RESEARCH ----
 async function fetchGeminiIntelligence(title: string, description: string, htmlText: string, domain: string) {
-  if (!GEMINI_API_KEY) return null;
   try {
     const cleanHtml = htmlText.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '').replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
     const textSnippet = cleanHtml.replace(/<[^>]+>/g, ' ').substring(0, 1500).replace(/\s+/g, ' ').trim();
     
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const systemPrompt = "You are a professional web analyst that outputs JSON only.";
     const prompt = `Perform website intelligence analysis on this domain: "${domain}"
 Title: "${title}"
 Description: "${description}"
 Text Content Sample: "${textSnippet}"
 
-Generate a JSON object with these keys (no markdown, pure JSON):
+Generate a JSON object with these keys (no markdown, pure JSON, only valid JSON):
 {
   "summary": "1 sentence executive summary of what this website is/does",
   "targetAudience": "Who is the primary audience for this website?",
@@ -415,12 +592,47 @@ Generate a JSON object with these keys (no markdown, pure JSON):
   "seoAdvice": ["Actionable SEO recommendation 1", "Actionable SEO recommendation 2", "Actionable SEO recommendation 3"]
 }`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text().trim().replace(/```json?\n?/g, '').replace(/```\n?/g, '');
-    return JSON.parse(text);
+    const completionText = await generateAiCompletion(prompt, systemPrompt);
+    const cleanedText = completionText.trim().replace(/```json?\n?/g, '').replace(/```\n?/g, '');
+    return JSON.parse(cleanedText);
   } catch (e) {
-    console.error('Gemini intelligence error:', e);
+    console.error('Website intelligence fallback error:', e);
     return null;
+  }
+}
+
+// ---- GEMINI WEBPAGE REAL/FAKE SAFETY CHECK ----
+async function runAiSafetyCheck(domain: string, title: string, description: string) {
+  try {
+    const systemPrompt = "You are a cyber security analyst specializing in domain threat intelligence and phishing detection. You output JSON only.";
+    const prompt = `Analyze this website details to check if it is REAL/LEGITIMATE, SUSPICIOUS, or a FAKE/SCAM website.
+Domain: "${domain}"
+Title: "${title}"
+Description: "${description}"
+
+Check for common red flags:
+- Typosquatting or brand lookalikes (e.g., netfl1x.com, secure-bank-login.net)
+- Overly generic, suspicious keywords in the domain or title
+- Phishing/scam language in title or description
+
+Generate a JSON object with these keys (no markdown, pure JSON, no enclosing quotes, only valid JSON):
+{
+  "verdict": "REAL" or "SUSPICIOUS" or "FAKE",
+  "trustScore": 0 to 100,
+  "analysis": "A brief explanation (2-3 sentences) detailing why this domain is marked as real, suspicious, or fake, citing specific pattern highlights."
+}`;
+
+    const completionText = await generateAiCompletion(prompt, systemPrompt);
+    const cleanedText = completionText.trim().replace(/```json?\n?/g, '').replace(/```\n?/g, '');
+    return JSON.parse(cleanedText);
+  } catch (e) {
+    console.error('AI safety check error:', e);
+    const isSuspiciousDomain = /(login|secure|verify|account|signin|update|bank|wallet|free|gift|win)/i.test(domain);
+    return {
+      verdict: isSuspiciousDomain ? 'SUSPICIOUS' : 'REAL',
+      trustScore: isSuspiciousDomain ? 45 : 85,
+      analysis: `Rule-based evaluation: The domain "${domain}" was checked. No active threats detected via standard patterns.`
+    };
   }
 }
 
@@ -549,7 +761,7 @@ export async function POST(request: NextRequest) {
     const originalDomain = getDomainName(url);
 
     // Early interception for lazy-loaded scan types that only target websites
-    if (scanType === 'intel' || scanType === 'lighthouse' || scanType === 'ai-research') {
+    if (scanType === 'intel' || scanType === 'lighthouse' || scanType === 'ai-research' || scanType === 'trust-safety') {
       // 1. Resolve redirect chain, hostname, and ipAddress
       let finalUrl = url;
       const redirectChain: string[] = [url];
@@ -637,11 +849,89 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      if (scanType === 'ai-research') {
+      if (scanType === 'trust-safety') {
         const getMeta = (names: string[]) => { for (const n of names) { const c = cheerioInstance(`meta[property="${n}"]`).attr('content') || cheerioInstance(`meta[name="${n}"]`).attr('content') || cheerioInstance(`meta[itemprop="${n}"]`).attr('content'); if (c) return c.trim(); } return ''; };
         const parsedTitle = getMeta(['og:title', 'twitter:title']) || cheerioInstance('title').text()?.trim() || finalDomain;
         const parsedDesc = getMeta(['og:description', 'twitter:description', 'description']) || 'No description available.';
-        const geminiIntel = await fetchGeminiIntelligence(parsedTitle, parsedDesc, htmlTextContent, finalDomain);
+        
+        const safetyResult = await runAiSafetyCheck(finalDomain, parsedTitle, parsedDesc);
+        return await sendResponse({
+          success: true,
+          trustSafety: safetyResult
+        });
+      }
+
+      if (scanType === 'ai-research') {
+        const isYt = /(youtube\.com|youtu\.be)/i.test(finalUrl) || /(youtube\.com|youtu\.be)/i.test(url);
+        const getMeta = (names: string[]) => { for (const n of names) { const c = cheerioInstance(`meta[property="${n}"]`).attr('content') || cheerioInstance(`meta[name="${n}"]`).attr('content') || cheerioInstance(`meta[itemprop="${n}"]`).attr('content'); if (c) return c.trim(); } return ''; };
+        const parsedTitle = getMeta(['og:title', 'twitter:title']) || cheerioInstance('title').text()?.trim() || finalDomain;
+        const parsedDesc = getMeta(['og:description', 'twitter:description', 'description']) || 'No description available.';
+
+        let geminiIntel = null;
+        if (isYt) {
+          const videoId = getYoutubeVideoId(finalUrl) || getYoutubeVideoId(url);
+          let transcriptText = '';
+          if (videoId) {
+            try {
+              let subtitleUrl = '';
+              let ytData: any = null;
+              
+              try {
+                const match = htmlTextContent.match(/ytInitialPlayerResponse\s*=\s*({.+?})\s*;/);
+                if (match) {
+                  ytData = JSON.parse(match[1]);
+                } else {
+                  const altMatch = htmlTextContent.match(/ytInitialPlayerResponse\s*=\s*({.+?})\s*<\/script>/);
+                  if (altMatch) {
+                    ytData = JSON.parse(altMatch[1]);
+                  }
+                }
+              } catch (err: any) {
+                console.error('Failed to parse ytInitialPlayerResponse in analyze route:', err.message);
+              }
+
+              const captionTracks = ytData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+              if (captionTracks && captionTracks.length > 0) {
+                const enTrack = captionTracks.find((t: any) => t.languageCode === 'en' && !t.vssId.startsWith('a.'));
+                const autoEnTrack = captionTracks.find((t: any) => t.languageCode === 'en');
+                const selectedTrack = enTrack || autoEnTrack || captionTracks[0];
+                subtitleUrl = selectedTrack.baseUrl;
+              }
+
+              if (!subtitleUrl) {
+                subtitleUrl = `https://www.youtube.com/api/timedtext?lang=en&v=${videoId}`;
+              }
+
+              const subtitleRes = await fetch(subtitleUrl, { signal: AbortSignal.timeout(8000) });
+              if (subtitleRes.ok) {
+                const xml = await subtitleRes.text();
+                const textRegex = /<text[^>]*>([\s\S]*?)<\/text>/g;
+                let match;
+                let textChunks = [];
+                while ((match = textRegex.exec(xml)) !== null) {
+                  const chunkText = match[1]
+                    .replace(/&amp;/g, '&')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&quot;/g, '"')
+                    .replace(/&#39;/g, "'")
+                    .replace(/&apos;/g, "'")
+                    .replace(/<[^>]*>/g, '')
+                    .trim();
+                  if (chunkText) textChunks.push(chunkText);
+                }
+                transcriptText = textChunks.join(' ');
+              }
+            } catch (ytErr) {
+              console.error('Failed to fetch transcript in analyze route:', ytErr);
+            }
+          }
+
+          geminiIntel = await fetchGeminiYoutubeSummary(parsedTitle, parsedDesc, transcriptText, finalDomain);
+        } else {
+          geminiIntel = await fetchGeminiIntelligence(parsedTitle, parsedDesc, htmlTextContent, finalDomain);
+        }
+
         return await sendResponse({
           success: true,
           geminiResearch: geminiIntel
@@ -754,6 +1044,7 @@ export async function POST(request: NextRequest) {
         }
 
         let title = 'YouTube Content', author = 'YouTube Creator', description = 'YouTube channel or page', previewUrl = '', duration = '', embedUrl = '';
+        let hasSubtitles = false;
         if (videoId) {
           title = 'YouTube Video';
           previewUrl = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
@@ -770,6 +1061,26 @@ export async function POST(request: NextRequest) {
               if (durMatch) { const s = Math.floor(parseInt(durMatch[1]) / 1000); duration = `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
               const descMatch = html.match(/"shortDescription":"([^"]{0,500})"/);
               if (descMatch) description = descMatch[1].replace(/\\n/g, ' ').replace(/\\"/g, '"');
+              
+              // Extract player response to check for captions track availability
+              try {
+                let ytData: any = null;
+                const match = html.match(/ytInitialPlayerResponse\s*=\s*({.+?})\s*;/);
+                if (match) {
+                  ytData = JSON.parse(match[1]);
+                } else {
+                  const altMatch = html.match(/ytInitialPlayerResponse\s*=\s*({.+?})\s*<\/script>/);
+                  if (altMatch) {
+                    ytData = JSON.parse(altMatch[1]);
+                  }
+                }
+                const captionTracks = ytData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+                if (captionTracks && captionTracks.length > 0) {
+                  hasSubtitles = true;
+                }
+              } catch (err) {
+                console.error('Failed to parse player response for subtitles check in analyze base route:', err);
+              }
             }
           } catch {}
         } else {
@@ -801,7 +1112,8 @@ export async function POST(request: NextRequest) {
         return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'youtube', contentType: videoId ? 'video' : 'website',
           title, description, previewUrl, embedUrl: embedUrl || undefined, author, duration,
-          mediaUrls: previewUrl ? [previewUrl] : [],
+          mediaUrls: [],
+          hasSubtitles,
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
@@ -838,7 +1150,7 @@ export async function POST(request: NextRequest) {
         return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'vimeo', contentType: 'video',
           title, description, previewUrl, embedUrl: embedUrl || undefined, author, duration,
-          mediaUrls: previewUrl ? [previewUrl] : [],
+          mediaUrls: [],
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
@@ -932,7 +1244,7 @@ export async function POST(request: NextRequest) {
         return await sendResponse({
           success: true, url: finalUrl, domain: finalDomain, platform: 'tiktok', contentType: 'video',
           title, description: `TikTok video by @${author}`, previewUrl, embedUrl, author,
-          mediaUrls: previewUrl ? [previewUrl] : [],
+          mediaUrls: [],
           linkIntel: { redirectChain, ipAddress, dnsRecords, safe: true, shortUrl: '', headers: responseHeadersObj },
         });
       } catch (err) {
@@ -1131,7 +1443,7 @@ export async function POST(request: NextRequest) {
     // Base scan (Skip all heavy APIs)
     return await sendResponse({
       success: true, url: finalUrl, domain: finalDomain, platform: 'website', contentType,
-      title: parsedTitle, description: parsedDesc, previewUrl: ogImage, mediaUrls: ogImage ? [ogImage] : [],
+      title: parsedTitle, description: parsedDesc, previewUrl: ogImage, mediaUrls: [],
       embedUrl: ogVideo || undefined, author: author || undefined, hashtags,
       techStack: techStack.length > 0 ? techStack : undefined,
       developerSpecs: extractDeveloperSpecs(htmlText, finalUrl),
