@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Link as LinkIcon, 
-  Loader2, 
   Image as ImageIcon, 
   Video as VideoIcon, 
   Music as MusicIcon, 
@@ -190,6 +189,222 @@ const LighthouseScoreCircle = ({ score, label }: { score: number; label: string 
     </div>
   );
 };
+
+// Premium Pure SVG Loader Components
+const LoaderTripleArcs = ({ className = "text-violet-600", size = 48 }: { className?: string; size?: number }) => (
+  <svg 
+    className={className}
+    style={{ width: size, height: size, display: 'inline-block' }}
+    viewBox="0 0 100 100" 
+    xmlSpace="preserve"
+  >
+    <path fill="currentColor" d="M31.6,3.5C5.9,13.6-6.6,42.7,3.5,68.4c10.1,25.7,39.2,38.3,64.9,28.1l-3.1-7.9c-21.3,8.4-45.4-2-53.8-23.3 c-8.4-21.3,2-45.4,23.3-53.8L31.6,3.5z">
+      <animateTransform 
+        attributeName="transform" 
+        attributeType="XML" 
+        type="rotate"
+        dur="2s" 
+        from="0 50 50"
+        to="360 50 50" 
+        repeatCount="indefinite" 
+      />
+    </path>
+    <path fill="currentColor" d="M42.3,39.6c5.7-4.3,13.9-3.1,18.1,2.7c4.3,5.7,3.1,13.9-2.7,18.1l4.1,5.5c8.8-6.5,10.6-19,4.1-27.7 c-6.5-8.8-19-10.6-27.7-4.1L42.3,39.6z">
+      <animateTransform 
+        attributeName="transform" 
+        attributeType="XML" 
+        type="rotate"
+        dur="1s" 
+        from="0 50 50"
+        to="-360 50 50" 
+        repeatCount="indefinite" 
+      />
+    </path>
+    <path fill="currentColor" d="M82,35.7C74.1,18,53.4,10.1,35.7,18S10.1,46.6,18,64.3l7.6-3.4c-6-13.5,0-29.3,13.5-35.3s29.3,0,35.3,13.5 L82,35.7z">
+      <animateTransform 
+        attributeName="transform" 
+        attributeType="XML" 
+        type="rotate"
+        dur="2s" 
+        from="0 50 50"
+        to="360 50 50" 
+        repeatCount="indefinite" 
+      />
+    </path>
+  </svg>
+);
+
+const LoaderOrbCircle = ({ className = "text-violet-650", size = 48 }: { className?: string; size?: number }) => (
+  <svg 
+    className={className}
+    style={{ width: size, height: size, display: 'inline-block' }}
+    viewBox="0 0 100 100" 
+    xmlSpace="preserve"
+  >
+    <circle fill="none" stroke="currentColor" strokeWidth="4" cx="50" cy="50" r="44" style={{ opacity: 0.25 }} />
+    <circle fill="currentColor" stroke="currentColor" strokeWidth="3" cx="8" cy="54" r="6" >
+      <animateTransform
+        attributeName="transform"
+        dur="2s"
+        type="rotate"
+        from="0 50 48"
+        to="360 50 52"
+        repeatCount="indefinite" 
+      />
+    </circle>
+  </svg>
+);
+
+const LoaderClock = ({ className = "text-violet-600", size = 48 }: { className?: string; size?: number }) => (
+  <svg 
+    className={className}
+    style={{ width: size, height: size, display: 'inline-block' }}
+    viewBox="0 0 100 100" 
+    xmlSpace="preserve"
+  >
+    <circle fill="none" stroke="currentColor" strokeWidth="4" strokeMiterlimit="10" cx="50" cy="50" r="48" style={{ opacity: 0.25 }} />
+    <line fill="none" strokeLinecap="round" stroke="currentColor" strokeWidth="4" strokeMiterlimit="10" x1="50" y1="50" x2="85" y2="50.5">
+      <animateTransform 
+        attributeName="transform" 
+        dur="2s"
+        type="rotate"
+        from="0 50 50"
+        to="360 50 50"
+        repeatCount="indefinite" 
+      />
+    </line>
+    <line fill="none" strokeLinecap="round" stroke="currentColor" strokeWidth="4" strokeMiterlimit="10" x1="50" y1="50" x2="49.5" y2="74">
+      <animateTransform 
+        attributeName="transform" 
+        dur="15s"
+        type="rotate"
+        from="0 50 50"
+        to="360 50 50"
+        repeatCount="indefinite" 
+      />
+    </line>
+  </svg>
+);
+
+const LoaderDoubleRing = ({ className = "text-violet-600", size = 48 }: { className?: string; size?: number }) => (
+  <svg 
+    className={className}
+    style={{ width: size, height: size, display: 'inline-block' }}
+    viewBox="0 0 100 100" 
+    xmlSpace="preserve"
+  >
+    <path fill="currentColor" d="M73,50c0-12.7-10.3-23-23-23S27,37.3,27,50 M30.9,50c0-10.5,8.5-19.1,19.1-19.1S69.1,39.5,69.1,50">
+      <animateTransform 
+        attributeName="transform" 
+        attributeType="XML" 
+        type="rotate"
+        dur="1s" 
+        from="0 50 50"
+        to="360 50 50" 
+        repeatCount="indefinite" 
+      />
+    </path>
+  </svg>
+);
+
+const LoaderEqualizer = ({ className = "text-violet-600", size = 48 }: { className?: string; size?: number }) => (
+  <svg 
+    className={className}
+    style={{ width: size, height: size, display: 'inline-block' }}
+    viewBox="0 0 100 100" 
+    xmlSpace="preserve"
+  >
+    <rect fill="currentColor" width="4" height="100" transform="translate(0) rotate(180 3 50)">
+      <animate
+        attributeName="height"
+        attributeType="XML"
+        dur="1s"
+        values="30; 100; 30"
+        repeatCount="indefinite"
+      />
+    </rect>
+    <rect x="20" fill="currentColor" width="4" height="100" transform="translate(0) rotate(180 20 50)">
+      <animate
+        attributeName="height"
+        attributeType="XML"
+        dur="1s"
+        values="30; 100; 30"
+        repeatCount="indefinite"
+        begin="0.1s"
+      />
+    </rect>
+    <rect x="40" fill="currentColor" width="4" height="100" transform="translate(0) rotate(180 40 50)">
+      <animate
+        attributeName="height"
+        attributeType="XML"
+        dur="1s"
+        values="30; 100; 30"
+        repeatCount="indefinite"
+        begin="0.3s"
+      />
+    </rect>
+    <rect x="60" fill="currentColor" width="4" height="100" transform="translate(0) rotate(180 58 50)">
+      <animate
+        attributeName="height"
+        attributeType="XML"
+        dur="1s"
+        values="30; 100; 30"
+        repeatCount="indefinite"
+        begin="0.5s"
+      />
+    </rect>
+    <rect x="80" fill="currentColor" width="4" height="100" transform="translate(0) rotate(180 76 50)">
+      <animate
+        attributeName="height"
+        attributeType="XML"
+        dur="1s"
+        values="30; 100; 30"
+        repeatCount="indefinite"
+        begin="0.1s"
+      />
+    </rect>
+  </svg>
+);
+
+const LoaderPulsingDots = ({ className = "text-white", size = 15 }: { className?: string; size?: number }) => (
+  <svg 
+    className={className}
+    style={{ width: size * 3, height: size, display: 'inline-block' }}
+    viewBox="0 0 100 100" 
+    xmlSpace="preserve"
+  >
+    <circle fill="currentColor" stroke="none" cx="15" cy="50" r="10">
+      <animateTransform 
+        attributeName="transform" 
+        dur="1s" 
+        type="translate" 
+        values="0 15 ; 0 -15; 0 15" 
+        repeatCount="indefinite" 
+        begin="0.1"
+      />
+    </circle>
+    <circle fill="currentColor" stroke="none" cx="50" cy="50" r="10">
+      <animateTransform 
+        attributeName="transform" 
+        dur="1s" 
+        type="translate" 
+        values="0 10 ; 0 -10; 0 10" 
+        repeatCount="indefinite" 
+        begin="0.2"
+      />
+    </circle>
+    <circle fill="currentColor" stroke="none" cx="85" cy="50" r="10">
+      <animateTransform 
+        attributeName="transform" 
+        dur="1s" 
+        type="translate" 
+        values="0 5 ; 0 -5; 0 5" 
+        repeatCount="indefinite" 
+        begin="0.3"
+      />
+    </circle>
+  </svg>
+);
 
 export default function Home() {
   const [inputUrl, setInputUrl] = useState('');
@@ -1454,7 +1669,7 @@ export default function Home() {
               >
                 {isLoading ? (
                   <>
-                    <Loader2 size={15} className="animate-spin" />
+                    <LoaderPulsingDots size={12} className="text-white mr-1" />
                     <span>Scanning</span>
                   </>
                 ) : (
@@ -1485,8 +1700,8 @@ export default function Home() {
               >
                 {(isLoading && !isPlatformMatched) ? (
                   <>
-                    <Loader2 size={13} className="animate-spin shrink-0 text-white" />
-                    <span className="text-white font-medium text-xs tracking-wide">{platforms[rollingIndex]}</span>
+                    <LoaderPulsingDots size={10} className="text-white shrink-0" />
+                    <span className="text-white font-medium text-xs tracking-wide ml-1">{platforms[rollingIndex]}</span>
                   </>
                 ) : (isPlatformMatched || result) ? (
                   <>
@@ -1557,7 +1772,7 @@ export default function Home() {
                       disabled={isSubmittingFeedback || !feedbackText.trim()}
                       className="px-3.5 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-medium rounded-lg text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
                     >
-                      {isSubmittingFeedback ? <Loader2 size={12} className="animate-spin" /> : null}
+                      {isSubmittingFeedback ? <LoaderPulsingDots size={10} className="text-white mr-1" /> : null}
                       <span>Submit Feedback</span>
                     </button>
                     <a
@@ -1625,7 +1840,7 @@ export default function Home() {
                     {isDownloadingVideo ? (
                       <div className="space-y-3 py-4 text-center border border-zinc-100 rounded-xl bg-zinc-50/50 p-4 animate-pulse-subtle">
                         <div className="flex flex-col items-center justify-center gap-2">
-                          <Loader2 size={24} className="text-zinc-800 animate-spin" />
+                          <LoaderOrbCircle size={40} className="text-zinc-800" />
                           <h4 className="text-xs font-semibold text-zinc-700 tracking-wide uppercase">Downloading Video Asset</h4>
                           <p className="text-[11px] text-zinc-400 font-light">{downloadText}</p>
                         </div>
@@ -1690,7 +1905,7 @@ export default function Home() {
                             className="w-full py-3 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-zinc-200/40 disabled:opacity-50"
                           >
                             {isDownloadingSubtitles ? (
-                              <Loader2 size={13} className="animate-spin text-zinc-650" />
+                              <LoaderPulsingDots size={10} className="text-zinc-650" />
                             ) : (
                               <FileText size={13} className="text-zinc-600" />
                             )}
@@ -1791,7 +2006,7 @@ export default function Home() {
                     {isExtractingAudio ? (
                       <div className="space-y-6 py-8 text-center animate-slide-up-in">
                         <div className="flex flex-col items-center justify-center gap-3">
-                          <Loader2 size={28} className="text-violet-500 animate-spin" />
+                          <LoaderEqualizer size={48} className="text-violet-500" />
                           <h4 className="text-sm font-semibold text-zinc-800 tracking-wide uppercase">Extracting Audio Track</h4>
                           <p className="text-xs text-zinc-400 font-light max-w-xs">{extractionText}</p>
                         </div>
@@ -1873,7 +2088,7 @@ export default function Home() {
                         {isDownloadingAudioFile ? (
                           <div className="space-y-3 py-4 text-center border border-zinc-100 rounded-xl bg-zinc-50/50 p-4 animate-pulse-subtle">
                             <div className="flex flex-col items-center justify-center gap-2">
-                              <Loader2 size={24} className="text-violet-500 animate-spin" />
+                              <LoaderEqualizer size={40} className="text-violet-500" />
                               <h4 className="text-xs font-semibold text-zinc-700 tracking-wide uppercase">Converting & Downloading MP3</h4>
                               <p className="text-[11px] text-zinc-400 font-light">{audioDownloadText}</p>
                             </div>
@@ -1938,7 +2153,7 @@ export default function Home() {
                             >
                               {isTranscribing ? (
                                 <>
-                                  <Loader2 size={15} className="animate-spin" />
+                                  <LoaderPulsingDots size={12} className="text-white" />
                                   <span>{transcriptionStatus || 'Processing...'}</span>
                                 </>
                               ) : (
@@ -2027,7 +2242,7 @@ export default function Home() {
                                         disabled={isSubmittingFeedback || !feedbackText.trim()}
                                         className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-medium rounded-md text-[10px] transition-all cursor-pointer flex items-center gap-1"
                                       >
-                                        {isSubmittingFeedback ? <Loader2 size={10} className="animate-spin" /> : null}
+                                        {isSubmittingFeedback ? <LoaderPulsingDots size={10} className="text-white mr-1" /> : null}
                                         <span>Send Report</span>
                                       </button>
                                       <a
@@ -2219,10 +2434,10 @@ export default function Home() {
                             className="w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-md"
                           >
                             {isRemovingBg ? (
-                              <>
-                                <Loader2 size={15} className="animate-spin" />
-                                <span>Removing background via AI… (30–60s)</span>
-                              </>
+                                <>
+                                  <LoaderPulsingDots size={12} className="text-white" />
+                                  <span>Removing background via AI… (30–60s)</span>
+                                </>
                             ) : (
                               <>
                                 <Eraser size={15} />
@@ -2285,7 +2500,7 @@ export default function Home() {
                                       disabled={isSubmittingFeedback || !feedbackText.trim()}
                                       className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-medium rounded-md text-[10px] transition-all cursor-pointer flex items-center gap-1"
                                     >
-                                      {isSubmittingFeedback ? <Loader2 size={10} className="animate-spin" /> : null}
+                                      {isSubmittingFeedback ? <LoaderPulsingDots size={10} className="text-white mr-1" /> : null}
                                       <span>Send Report</span>
                                     </button>
                                     <a
@@ -2326,7 +2541,7 @@ export default function Home() {
                           >
                             {ocrProgress !== null ? (
                               <>
-                                <Loader2 size={13} className="animate-spin" />
+                                <LoaderPulsingDots size={12} className="text-white" />
                                 <span>{ocrStatus} ({ocrProgress}%)</span>
                               </>
                             ) : (
@@ -2376,7 +2591,7 @@ export default function Home() {
 
                     {lazyLoadingTab === 'lighthouse' ? (
                       <div className="py-20 flex flex-col items-center justify-center gap-3 text-center">
-                        <Loader2 size={36} className="text-violet-600 animate-spin" />
+                        <LoaderDoubleRing size={48} className="text-violet-600" />
                         <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider text-zinc-850">Running Lighthouse Audits...</span>
                         <p className="text-[11px] text-zinc-400 font-light max-w-xs mx-auto">Analyzing page weight, DOM elements, response compression, and SEO tags...</p>
                       </div>
@@ -2463,7 +2678,7 @@ export default function Home() {
 
                     {screenshotLoading ? (
                       <div className="w-full h-72 border border-zinc-100 rounded-xl bg-zinc-50/50 flex flex-col items-center justify-center gap-2">
-                        <Loader2 size={24} className="text-violet-500 animate-spin" />
+                        <LoaderClock size={48} className="text-violet-500" />
                         <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider">Capturing Live {screenshotDevice} view</span>
                         <span className="text-[10px] text-zinc-400 font-light">Launching headless browser session...</span>
                       </div>
@@ -2609,7 +2824,7 @@ export default function Home() {
 
                     {lazyLoadingTab === 'ai-research' ? (
                       <div className="py-20 flex flex-col items-center justify-center gap-3 text-center">
-                        <Loader2 size={36} className="text-violet-600 animate-spin" />
+                        <LoaderOrbCircle size={48} className="text-violet-650" />
                         <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider text-zinc-850">Generating AI Web Intelligence...</span>
                         <p className="text-[11px] text-zinc-400 font-light max-w-xs mx-auto">Analyzing website content to extract competitors, target audience, and actionable SEO advice...</p>
                       </div>
@@ -3076,7 +3291,7 @@ export default function Home() {
                   <div className="space-y-4 animate-slide-up-in">
                     {lazyLoadingTab === 'link-intel' ? (
                       <div className="py-20 flex flex-col items-center justify-center gap-3 text-center">
-                        <Loader2 size={36} className="text-violet-600 animate-spin" />
+                        <LoaderTripleArcs size={48} className="text-violet-600" />
                         <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider text-zinc-850">Loading Link Intelligence...</span>
                         <p className="text-[11px] text-zinc-400 font-light max-w-xs mx-auto">Fetching safety checks, WHOIS registry, DNS records, and IP geolocation details...</p>
                       </div>
@@ -3396,7 +3611,7 @@ export default function Home() {
                     
                     {lazyLoadingTab === 'ai-tools' ? (
                       <div className="py-20 flex flex-col items-center justify-center gap-3 text-center">
-                        <Loader2 size={36} className="text-violet-600 animate-spin" />
+                        <LoaderOrbCircle size={48} className="text-violet-600" />
                         <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider text-zinc-850">Generating AI Suggestions...</span>
                         <p className="text-[11px] text-zinc-400 font-light max-w-xs mx-auto">Crafting viral titles, engaging captions, optimized meta tags, and trending hashtags...</p>
                       </div>
