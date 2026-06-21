@@ -1,0 +1,136 @@
+import crypto from 'crypto';
+
+const AUTH_SECRET = process.env.AUTH_SECRET || 'user_auth_secure_secret_123!';
+
+export function hashPassword(password: string): { hash: string; salt: string } {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return { hash, salt };
+}
+
+export function verifyPassword(password: string, hash: string, salt: string): boolean {
+  const testHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return hash === testHash;
+}
+
+export function createToken(email: string, role: string): string {
+  const payload = JSON.stringify({ email, role, expiresAt: Date.now() + 1000 * 60 * 60 * 24 });
+  const signature = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('hex');
+  return `${Buffer.from(payload).toString('base64')}.${signature}`;
+}
+
+export function verifyToken(token: string): { email: string; role: string } | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 2) return null;
+    const payloadStr = Buffer.from(parts[0], 'base64').toString('utf8');
+    const signature = parts[1];
+    
+    const expectedSig = crypto.createHmac('sha256', AUTH_SECRET).update(payloadStr).digest('hex');
+    if (signature !== expectedSig) return null;
+    
+    const data = JSON.parse(payloadStr);
+    if (Date.now() > data.expiresAt) return null;
+    return { email: data.email, role: data.role };
+  } catch {
+    return null;
+  }
+}
+
+export async function getCurrentUser() {
+  try {
+    const { currentUser } = await import('@clerk/nextjs/server');
+    const { connectToDatabase } = await import('@/lib/db');
+    const User = (await import('@/models/User')).default;
+    const crypto = await import('crypto');
+
+    const clerkUser = await currentUser();
+    if (!clerkUser) return null;
+
+    const email = clerkUser.emailAddresses[0]?.emailAddress?.toLowerCase();
+    if (!email) return null;
+
+    await connectToDatabase();
+    let user = await User.findOne({ email });
+    if (!user) {
+      // Lazy sync: create new standard user in our local database
+      const randomSalt = crypto.randomBytes(16).toString('hex');
+      const randomHash = crypto.randomBytes(32).toString('hex');
+      
+      const adminEmail = (process.env.ADMIN_EMAIL || 'shashank8808108802@gmail.com').toLowerCase();
+      const role = (email === adminEmail) ? 'admin' : 'standard';
+
+      user = await User.create({
+        email,
+        passwordHash: `clerk_oauth_${randomHash}`,
+        salt: randomSalt,
+        role: role,
+        createdAt: new Date()
+      });
+    }
+
+    return {
+      email: user.email,
+      role: user.role as 'standard' | 'pro' | 'admin'
+    };
+  } catch (err) {
+    console.error('getCurrentUser error:', err);
+    return null;
+  }
+}
+
+export async function checkFeaturePermission(featureName: string): Promise<{
+  authorized: boolean;
+  requiredLevel: 'free' | 'registered' | 'pro';
+  user: { email: string; role: 'standard' | 'pro' | 'admin' } | null;
+}> {
+  try {
+    const { connectToDatabase } = await import('@/lib/db');
+    const ApiConfig = (await import('@/models/ApiConfig')).default;
+
+    await connectToDatabase();
+    const config = await ApiConfig.findOne({ featureName });
+    
+    // Map of default tiers if not configured in DB
+    const defaultTiers: Record<string, 'free' | 'registered' | 'pro'> = {
+      'analyze-intel': 'registered',
+      'analyze-lighthouse': 'free',
+      'analyze-ai-research': 'registered',
+      'analyze-ai-writer': 'pro',
+      'download-media': 'free',
+      'transcribe': 'registered',
+      'remove-bg': 'pro',
+      'screenshot': 'registered'
+    };
+
+    const requiredLevel = config ? config.requiredLevel : (defaultTiers[featureName] || 'registered');
+
+    if (requiredLevel === 'free') {
+      const user = await getCurrentUser();
+      return { authorized: true, requiredLevel, user };
+    }
+
+    const user = await getCurrentUser();
+    if (!user) {
+      return { authorized: false, requiredLevel, user: null };
+    }
+
+    if (requiredLevel === 'registered') {
+      return { authorized: true, requiredLevel, user };
+    }
+
+    if (requiredLevel === 'pro') {
+      if (user.role === 'pro' || user.role === 'admin') {
+        return { authorized: true, requiredLevel, user };
+      }
+      return { authorized: false, requiredLevel, user };
+    }
+
+    return { authorized: false, requiredLevel, user };
+  } catch (err) {
+    console.error('checkFeaturePermission error:', err);
+    return { authorized: false, requiredLevel: 'registered', user: null };
+  }
+}
+
+

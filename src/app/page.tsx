@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useUser, useClerk, SignInButton, SignUpButton } from '@clerk/nextjs';
 import { 
   Link as LinkIcon, 
   Image as ImageIcon, 
@@ -151,6 +152,22 @@ interface AnalysisResult {
     verdict: 'REAL' | 'SUSPICIOUS' | 'FAKE';
     trustScore: number;
     analysis: string;
+  };
+  locationData?: {
+    latitude: number;
+    longitude: number;
+    address?: string;
+    embedUrl?: string;
+  };
+  productData?: {
+    price: number;
+    currency: string;
+    title?: string;
+    priceHistory?: Array<{
+      price: number;
+      currency: string;
+      timestamp: string;
+    }>;
   };
 }
 
@@ -488,11 +505,432 @@ const getTabTransitionLoader = (tabId: string, platform?: string | null) => {
   );
 };
 
+interface SubtitleItem {
+  index: number;
+  start: number;
+  end: number;
+  text: string;
+}
+
+interface ExtraOverlay {
+  id: string;
+  text: string;
+  start: number;
+  end: number;
+  x: number;
+  y: number;
+  fontSize: number;
+  color: string;
+  backgroundColor?: string;
+}
+
+const CAPTION_PRESETS = [
+  { id: 'tiktok-bold', name: 'TikTok Bold', style: { fontFamily: '"Impact", sans-serif', color: '#FFFF00', textShadow: '2px 2px 0px #000, -2px -2px 0px #000, 2px -2px 0px #000, -2px 2px 0px #000', fontSize: '26px', fontWeight: 'bold', textTransform: 'uppercase' } },
+  { id: 'classic-white', name: 'Netflix Classic', style: { fontFamily: 'sans-serif', color: '#FFFFFF', textShadow: '1px 1px 3px rgba(0,0,0,0.8)', fontSize: '22px' } },
+  { id: 'neon-cyan', name: 'Neon Cyber', style: { fontFamily: '"Arial Black", sans-serif', color: '#00FFFF', textShadow: '0 0 10px #00FFFF, 0 0 20px #00FFFF', fontSize: '24px', fontWeight: 'bold' } },
+  { id: 'neon-pink', name: 'Neon Pink', style: { fontFamily: '"Arial Black", sans-serif', color: '#FF00FF', textShadow: '0 0 10px #FF00FF, 0 0 20px #FF00FF', fontSize: '24px', fontWeight: 'bold' } },
+  { id: 'arcade', name: 'Arcade Retro', style: { fontFamily: '"Courier New", monospace', color: '#00FF00', backgroundColor: 'rgba(0,0,0,0.7)', padding: '4px 8px', borderRadius: '4px', fontSize: '20px', letterSpacing: '2px' } },
+  { id: 'comic', name: 'Comic Bubble', style: { fontFamily: '"Comic Sans MS", cursive', color: '#FFD750', textShadow: '2px 2px 0px #FF4500', fontSize: '24px', fontWeight: 'bold' } },
+  { id: 'minimal-black', name: 'Minimal Box', style: { fontFamily: 'sans-serif', color: '#FFFFFF', backgroundColor: '#000000', padding: '6px 12px', fontSize: '20px', fontWeight: 'medium' } },
+  { id: 'royal-gold', name: 'Royal Gold', style: { fontFamily: '"Times New Roman", serif', color: '#FFD700', textShadow: '1px 1px 2px #000000', fontSize: '24px', fontStyle: 'italic' } },
+  { id: 'vhs-glitch', name: 'VHS Glitch', style: { fontFamily: 'monospace', color: '#FFFFFF', textShadow: '2px 0 0 #FF0000, -2px 0 0 #0000FF', fontSize: '22px' } },
+  { id: 'gradient-sunset', name: 'Sunset Gradient', style: { fontFamily: '"Impact", sans-serif', color: '#FF4500', textShadow: '1px 1px 0px #FFFF00', fontSize: '26px', fontWeight: 'bold' } },
+  { id: 'bold-red', name: 'Alert Red', style: { fontFamily: 'sans-serif', color: '#FF0000', fontWeight: '900', textShadow: '1px 1px 1px #000', fontSize: '28px', textTransform: 'uppercase' } },
+  { id: 'speech', name: 'Speech Bubble', style: { fontFamily: 'sans-serif', color: '#000000', backgroundColor: '#FFFFFF', border: '2px solid #000', borderRadius: '15px', padding: '8px 16px', fontSize: '20px' } },
+  { id: 'crayon', name: 'Crayon Soft', style: { fontFamily: 'sans-serif', color: '#FFB6C1', textShadow: '1px 1px 0px #DDA0DD', fontSize: '24px', fontWeight: 'bold' } },
+  { id: 'monospace-orange', name: 'Console Orange', style: { fontFamily: 'monospace', color: '#FFA500', fontSize: '20px' } },
+  { id: 'clean-grey', name: 'Subtle Outline', style: { fontFamily: 'sans-serif', color: '#F5F5F5', textShadow: '0px 0px 4px #808080', fontSize: '22px' } },
+  { id: 'shadow-yellow', name: 'Shadow Yellow', style: { fontFamily: 'sans-serif', color: '#FFFF00', textShadow: '3px 3px 0px rgba(0,0,0,0.6)', fontSize: '24px', fontWeight: 'bold' } },
+  { id: 'heavy-metal', name: 'Heavy Metal', style: { fontFamily: '"Impact", sans-serif', color: '#708090', textShadow: '2px 2px 2px #000', fontSize: '26px', letterSpacing: '1px' } },
+  { id: 'chalkboard', name: 'Chalk White', style: { fontFamily: 'cursive', color: '#F0FFF0', textShadow: '1px 1px 2px #2F4F4F', fontSize: '22px' } },
+  { id: 'cyberpunk-yellow', name: 'Cyberpunk Solid', style: { fontFamily: '"Arial Black", sans-serif', color: '#000000', backgroundColor: '#FFFF00', padding: '6px 10px', fontSize: '22px', fontWeight: 'black' } },
+  { id: 'future-green', name: 'Matrix Digital', style: { fontFamily: 'monospace', color: '#00FF00', textShadow: '0 0 5px #00FF00', fontSize: '22px' } }
+];
+
 export default function Home() {
   const [inputUrl, setInputUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+
+  // User Authentication States
+  const [currentUser, setCurrentUser] = useState<{ email: string; role: 'standard' | 'pro' | 'admin' } | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'signup' | 'login'>('signup');
+  const [authModalRequiredLevel, setAuthModalRequiredLevel] = useState<'registered' | 'pro'>('registered');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+
+  const { user: clerkUser, isLoaded: clerkLoaded } = useUser();
+  const { signOut } = useClerk();
+
+  useEffect(() => {
+    if (clerkLoaded) {
+      if (clerkUser) {
+        fetch('/api/auth/me')
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && data.user) {
+              setCurrentUser(data.user);
+              setIsAuthModalOpen(false);
+            }
+          })
+          .catch(err => console.error('Failed to fetch session on Clerk change:', err));
+      } else {
+        setCurrentUser(null);
+      }
+    }
+  }, [clerkUser, clerkLoaded]);
+
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      setCurrentUser(null);
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+  };
+
+  // Caption Editor States
+  const [editorSubtitles, setEditorSubtitles] = useState<SubtitleItem[]>([]);
+  const [editorVideoUrl, setEditorVideoUrl] = useState('');
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [isResolvingVideo, setIsResolvingVideo] = useState(false);
+  const [editorStylePreset, setEditorStylePreset] = useState('tiktok-bold');
+  const [editorCurrentTime, setEditorCurrentTime] = useState(0);
+  const [editorExtraOverlays, setEditorExtraOverlays] = useState<ExtraOverlay[]>([]);
+  const [videoAspectRatio, setVideoAspectRatio] = useState<'landscape' | 'portrait'>('landscape');
+  const [isAutoCaptioning, setIsAutoCaptioning] = useState(false);
+  const [autoCaptionError, setAutoCaptionError] = useState<string | null>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  // States for creating/adding new overlays
+  const [newOverlayText, setNewOverlayText] = useState('');
+  const [newOverlayStart, setNewOverlayStart] = useState(0);
+  const [newOverlayEnd, setNewOverlayEnd] = useState(5);
+  const [newOverlayX, setNewOverlayX] = useState(50);
+  const [newOverlayY, setNewOverlayY] = useState(20);
+  const [newOverlayFontSize, setNewOverlayFontSize] = useState(20);
+  const [newOverlayColor, setNewOverlayColor] = useState('#FFFFFF');
+  const [newOverlayBgColor, setNewOverlayBgColor] = useState('transparent');
+
+  const parseSrt = (srtText: string): SubtitleItem[] => {
+    const list: SubtitleItem[] = [];
+    const normalized = srtText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const blocks = normalized.split('\n\n');
+    
+    const parseTime = (timeStr: string): number => {
+      const parts = timeStr.trim().replace('.', ',').split(',');
+      const ms = parts[1] ? parseInt(parts[1], 10) : 0;
+      const hms = parts[0].split(':');
+      const h = parseInt(hms[0], 10) || 0;
+      const m = parseInt(hms[1], 10) || 0;
+      const s = parseInt(hms[2], 10) || 0;
+      return h * 3600 + m * 60 + s + ms / 1000;
+    };
+
+    let idxCount = 1;
+    for (const block of blocks) {
+      const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length >= 3) {
+        const idx = parseInt(lines[0], 10) || idxCount;
+        const times = lines[1].split('-->');
+        if (times.length === 2) {
+          const start = parseTime(times[0]);
+          const end = parseTime(times[1]);
+          const text = lines.slice(2).join('\n');
+          list.push({ index: idx, start, end, text });
+          idxCount++;
+        }
+      }
+    }
+    return list;
+  };
+
+  const buildSubtitlesFromWords = (words: any[]): SubtitleItem[] => {
+    const list: SubtitleItem[] = [];
+    let currentSegment: string[] = [];
+    let start = 0;
+    let index = 1;
+    
+    words.forEach((w, idx) => {
+      if (currentSegment.length === 0) {
+        start = w.start / 1000;
+      }
+      currentSegment.push(w.text);
+      
+      const isPunctuation = /[.!?]$/.test(w.text);
+      if (currentSegment.length >= 5 || isPunctuation || idx === words.length - 1) {
+        const end = w.end / 1000;
+        list.push({
+          index,
+          start,
+          end,
+          text: currentSegment.join(' ')
+        });
+        currentSegment = [];
+        index++;
+      }
+    });
+    return list;
+  };
+
+  const handleLaunchCaptionEditor = async () => {
+    if (!result || !result.url) return;
+    setIsEditorOpen(true);
+    setIsResolvingVideo(true);
+    setEditorSubtitles([]);
+    
+    let resolvedVideo = '';
+    const isDirectVid = /\.(mp4|webm|ogg|mov|m4v|3gp|avi)(\?.*)?$/i.test(result.url);
+    if (isDirectVid || result.platform === 'direct-video') {
+      resolvedVideo = result.url;
+      setEditorVideoUrl(result.url);
+      setIsResolvingVideo(false);
+    } else {
+      try {
+        const res = await fetch('/api/download-media', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: result.url, downloadMode: 'video' })
+        });
+        const data = await res.json();
+        if (data.success && data.downloadUrl) {
+          resolvedVideo = data.downloadUrl;
+          setEditorVideoUrl(data.downloadUrl);
+        } else {
+          resolvedVideo = result.url;
+          setEditorVideoUrl(result.url);
+        }
+      } catch (err) {
+        console.error('Failed to resolve Cobalt video:', err);
+        resolvedVideo = result.url;
+        setEditorVideoUrl(result.url);
+      } finally {
+        setIsResolvingVideo(false);
+      }
+    }
+
+    // Auth gate check
+    let resolvedSubRes = null;
+    try {
+      resolvedSubRes = await fetch(`/api/subtitles?url=${encodeURIComponent(result.url)}`);
+      if (resolvedSubRes.status === 403) {
+        const errorData = await resolvedSubRes.json().catch(() => ({}));
+        setAuthModalRequiredLevel(errorData.requiredLevel || 'registered');
+        setAuthModalMode('signup');
+        setIsAuthModalOpen(true);
+        setIsResolvingVideo(false);
+        setIsEditorOpen(false);
+        return;
+      }
+    } catch {}
+
+    let parsedList: SubtitleItem[] = [];
+    if (transcriptionWords && transcriptionWords.length > 0) {
+      parsedList = buildSubtitlesFromWords(transcriptionWords);
+    } else if (resolvedSubRes && resolvedSubRes.ok) {
+      try {
+        const subData = await resolvedSubRes.json();
+        if (subData.success && subData.srt) {
+          parsedList = parseSrt(subData.srt);
+        }
+      } catch (err) {
+        console.warn('Failed to auto-fetch subtitles for editor:', err);
+      }
+    }
+
+    if (parsedList.length === 0) {
+      parsedList = [
+        { index: 1, start: 1, end: 4, text: "Welcome to LinkToPreview Video Editor! 🚀" },
+        { index: 2, start: 5, end: 9, text: "Click styles on the right to change designs dynamically. ✨" },
+        { index: 3, start: 10, end: 14, text: "You can sync your voice and type custom overlays! 🎬" }
+      ];
+    }
+    setEditorSubtitles(parsedList);
+    setTimeout(() => {
+      editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 200);
+  };
+
+  const handleUpdateSubtitleText = (index: number, newText: string) => {
+    setEditorSubtitles(prev => prev.map(s => s.index === index ? { ...s, text: newText } : s));
+  };
+
+  const handleUpdateSubtitleTimes = (index: number, start: number, end: number) => {
+    setEditorSubtitles(prev => prev.map(s => s.index === index ? { ...s, start, end } : s));
+  };
+
+  const handleAddSubtitleItem = () => {
+    setEditorSubtitles(prev => {
+      const last = prev[prev.length - 1];
+      const nextStart = last ? last.end + 1 : 0;
+      const nextEnd = nextStart + 3;
+      const nextIndex = last ? last.index + 1 : 1;
+      return [...prev, { index: nextIndex, start: nextStart, end: nextEnd, text: 'New caption text' }];
+    });
+  };
+
+  const handleDeleteSubtitleItem = (index: number) => {
+    setEditorSubtitles(prev => prev.filter(s => s.index !== index).map((s, idx) => ({ ...s, index: idx + 1 })));
+  };
+
+  const formatSrtTime = (seconds: number): string => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 1000);
+    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+  };
+
+  const handleDownloadEditorSubtitles = () => {
+    if (editorSubtitles.length === 0) return;
+    let srt = '';
+    editorSubtitles.forEach((sub, idx) => {
+      const startSrt = formatSrtTime(sub.start);
+      const endSrt = formatSrtTime(sub.end);
+      srt += `${idx + 1}\n${startSrt} --> ${endSrt}\n${sub.text}\n\n`;
+    });
+    const blob = new Blob([srt], { type: 'text/srt' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const downloadFilename = (result?.title || 'edited_subtitles')
+      .replace(/[^a-z0-9]/gi, '_')
+      .toLowerCase();
+    a.download = `${downloadFilename}.srt`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  };
+
+  const handleAutoCaption = async () => {
+    if (!result || !result.url) return;
+    setIsAutoCaptioning(true);
+    setAutoCaptionError(null);
+    try {
+      let srtData = null;
+      try {
+        const subRes = await fetch(`/api/subtitles?url=${encodeURIComponent(result.url)}`);
+        if (subRes.ok) {
+          const subJson = await subRes.json();
+          if (subJson.success && subJson.srt) {
+            srtData = subJson.srt;
+          }
+        }
+      } catch (e) {
+        console.warn('Subtitles API check failed, falling back to Transcription:', e);
+      }
+
+      if (srtData) {
+        const parsed = parseSrt(srtData);
+        setEditorSubtitles(parsed);
+        setIsAutoCaptioning(false);
+        return;
+      }
+
+      const mediaUrl = editorVideoUrl || result.mediaUrls?.[0] || result.url;
+      const submitRes = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioUrl: mediaUrl }),
+      });
+
+      if (submitRes.status === 403) {
+        const errorData = await submitRes.json().catch(() => ({}));
+        setAuthModalRequiredLevel(errorData.requiredLevel || 'registered');
+        setAuthModalMode(currentUser ? 'login' : 'signup');
+        setIsAuthModalOpen(true);
+        setIsAutoCaptioning(false);
+        return;
+      }
+
+      const submitData = await submitRes.json();
+      if (!submitData.success) {
+        throw new Error(submitData.error || 'Failed to start transcription');
+      }
+
+      if (submitData.status === 'completed' && submitData.words) {
+        const parsed = buildSubtitlesFromWords(submitData.words);
+        setEditorSubtitles(parsed);
+        setIsAutoCaptioning(false);
+        return;
+      }
+
+      if (!submitData.transcriptId) {
+        throw new Error('No transcript ID or words returned.');
+      }
+
+      let attempts = 0;
+      const interval = setInterval(async () => {
+        attempts++;
+        try {
+          const pollRes = await fetch(`/api/transcribe?id=${submitData.transcriptId}`);
+          const pollData = await pollRes.json();
+          if (!pollData.success) {
+            clearInterval(interval);
+            setIsAutoCaptioning(false);
+            setAutoCaptionError(pollData.error || 'Transcription failed');
+            return;
+          }
+
+          if (pollData.status === 'completed') {
+            clearInterval(interval);
+            setIsAutoCaptioning(false);
+            if (pollData.words) {
+              const parsed = buildSubtitlesFromWords(pollData.words);
+              setEditorSubtitles(parsed);
+            } else {
+              setAutoCaptionError('No words found in transcript.');
+            }
+          } else if (pollData.status === 'error') {
+            clearInterval(interval);
+            setIsAutoCaptioning(false);
+            setAutoCaptionError(pollData.error || 'Transcription processing error');
+          } else if (attempts > 100) {
+            clearInterval(interval);
+            setIsAutoCaptioning(false);
+            setAutoCaptionError('Transcription timed out. Please try again.');
+          }
+        } catch (pollErr: any) {
+          console.error(pollErr);
+        }
+      }, 4000);
+
+    } catch (err: any) {
+      console.error(err);
+      setAutoCaptionError(err.message || 'Auto-caption generation failed.');
+      setIsAutoCaptioning(false);
+    }
+  };
+
+  const handleAddExtraOverlay = () => {
+    if (!newOverlayText.trim()) return;
+    const newOverlay: ExtraOverlay = {
+      id: Math.random().toString(36).substring(2, 9),
+      text: newOverlayText,
+      start: newOverlayStart,
+      end: newOverlayEnd,
+      x: newOverlayX,
+      y: newOverlayY,
+      fontSize: newOverlayFontSize,
+      color: newOverlayColor,
+      backgroundColor: newOverlayBgColor
+    };
+    setEditorExtraOverlays(prev => [...prev, newOverlay]);
+    setNewOverlayText('');
+  };
+
+  const handleDeleteExtraOverlay = (id: string) => {
+    setEditorExtraOverlays(prev => prev.filter(o => o.id !== id));
+  };
   
   // High-fidelity animation states
   const [isShaking, setIsShaking] = useState(false);
@@ -735,6 +1173,14 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: result.url, scanType }),
       });
+      if (res.status === 403) {
+        const errorData = await res.json().catch(() => ({}));
+        setAuthModalRequiredLevel(errorData.requiredLevel || 'registered');
+        setAuthModalMode(currentUser ? 'login' : 'signup');
+        setIsAuthModalOpen(true);
+        setLazyLoadingTab(null);
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         setResult(prev => {
@@ -1178,6 +1624,19 @@ export default function Home() {
         })
       });
 
+      if (res.status === 403) {
+        const errorData = await res.json().catch(() => ({}));
+        setAuthModalRequiredLevel(errorData.requiredLevel || 'registered');
+        setAuthModalMode(currentUser ? 'login' : 'signup');
+        setIsAuthModalOpen(true);
+        if (downloadMode === 'audio') {
+          setIsDownloadingAudioFile(false);
+        } else {
+          setIsDownloadingVideo(false);
+        }
+        return;
+      }
+
       if (downloadMode === 'audio') {
         setAudioDownloadProgress(60);
         setAudioDownloadText('Resolving audio tunnel stream...');
@@ -1248,6 +1707,14 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: targetUrl, device })
       });
+      if (res.status === 403) {
+        const errorData = await res.json().catch(() => ({}));
+        setAuthModalRequiredLevel(errorData.requiredLevel || 'registered');
+        setAuthModalMode(currentUser ? 'login' : 'signup');
+        setIsAuthModalOpen(true);
+        setScreenshotLoading(false);
+        return;
+      }
       const data = await res.json();
       if (data.success && data.imageDataUrl) {
         setScreenshotData(prev => ({ ...prev, [device]: data.imageDataUrl }));
@@ -1310,6 +1777,14 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrl }),
       });
+      if (res.status === 403) {
+        const errorData = await res.json().catch(() => ({}));
+        setAuthModalRequiredLevel(errorData.requiredLevel || 'pro');
+        setAuthModalMode(currentUser ? 'login' : 'signup');
+        setIsAuthModalOpen(true);
+        setIsRemovingBg(false);
+        return;
+      }
       const data = await res.json();
       if (data.success && data.imageDataUrl) {
         setRemovedBgImageUrl(data.imageDataUrl);
@@ -1347,6 +1822,14 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audioUrl }),
       });
+      if (submitRes.status === 403) {
+        const errorData = await submitRes.json().catch(() => ({}));
+        setAuthModalRequiredLevel(errorData.requiredLevel || 'registered');
+        setAuthModalMode(currentUser ? 'login' : 'signup');
+        setIsAuthModalOpen(true);
+        setIsTranscribing(false);
+        return;
+      }
       const submitData = await submitRes.json();
       if (!submitData.success) {
         throw new Error(submitData.error || 'Failed to submit audio');
@@ -1662,6 +2145,47 @@ export default function Home() {
 
   return (
     <div className="relative flex flex-col flex-1 items-center justify-start min-h-screen z-10 px-4 md:px-8 py-12 dots-bg select-none">
+      
+      {/* Floating User Account Pill at top right */}
+      <div className="absolute top-6 right-6 z-35 flex items-center gap-2">
+        {currentUser ? (
+          <div className="flex items-center gap-2 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-xl border border-zinc-200/50 dark:border-zinc-800/40 rounded-full px-4 py-2 text-xs text-zinc-700 dark:text-zinc-305 shadow-lg select-text">
+            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="font-mono max-w-[120px] truncate">{currentUser.email}</span>
+            <span className="px-1.5 py-0.5 bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-400 rounded-md text-[9px] font-bold uppercase tracking-wider">
+              {currentUser.role}
+            </span>
+            {currentUser.role === 'admin' && (
+              <a 
+                href="/adminpanel" 
+                target="_blank"
+                className="text-violet-650 hover:text-violet-750 dark:text-violet-400 text-[10px] font-semibold border-l border-zinc-200 dark:border-zinc-800 pl-2 ml-1"
+              >
+                Admin
+              </a>
+            )}
+            <button 
+              onClick={handleLogout} 
+              className="text-zinc-400 hover:text-zinc-650 dark:hover:text-white transition-colors cursor-pointer border-l border-zinc-200 dark:border-zinc-800 pl-2 ml-1 text-[10px] font-semibold"
+            >
+              Logout
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => {
+              setAuthModalRequiredLevel('registered');
+              setAuthModalMode('login');
+              setAuthError(null);
+              setIsAuthModalOpen(true);
+            }}
+            className="flex items-center gap-1.5 bg-zinc-900/95 hover:bg-zinc-850 border border-zinc-800 rounded-full px-4 py-2 text-xs font-semibold text-white shadow-lg cursor-pointer transition-all active:scale-95"
+          >
+            <UserIcon size={13} />
+            <span>Sign In</span>
+          </button>
+        )}
+      </div>
       
       {/* Background gridlines */}
       <div className="gridlines-container">
@@ -2015,6 +2539,17 @@ export default function Home() {
                             <span>{result.hasSubtitles === false ? 'Subtitles Not Available' : 'Download Subtitles (.srt)'}</span>
                           </button>
                         )}
+
+                        {result.contentType === 'video' && (
+                          <button
+                            onClick={handleLaunchCaptionEditor}
+                            className="w-full py-3.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                          >
+                            <Sparkles size={13} />
+                            <span>Edit Captions & Styles</span>
+                          </button>
+                        )}
+
 
                         {result.previewUrl && (
                           <button
@@ -2376,7 +2911,17 @@ export default function Home() {
                 {/* 4. WEBSITE METADATA TAB */}
                 {activeAsset === 'website' && (
                   <div className="space-y-4 animate-slide-up-in">
-                    {result.previewUrl ? (
+                    {result.locationData ? (
+                      <div className="relative w-full rounded-xl overflow-hidden border border-zinc-100 bg-zinc-50 h-[260px] p-1">
+                        <iframe
+                          title="Location Map"
+                          src={result.locationData.embedUrl}
+                          className="w-full h-full border-0 rounded-lg"
+                          allowFullScreen
+                          loading="lazy"
+                        ></iframe>
+                      </div>
+                    ) : result.previewUrl ? (
                       <div className="relative w-full rounded-xl overflow-hidden bg-zinc-50 border border-zinc-100 flex justify-center items-center max-h-[260px] p-1">
                         <img 
                           src={result.previewUrl} 
@@ -2392,10 +2937,79 @@ export default function Home() {
                     )}
 
                     <div className="space-y-1">
-                      <h3 className="text-base font-semibold text-zinc-800 leading-snug">{result.title}</h3>
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="text-base font-semibold text-zinc-800 leading-snug">{result.title}</h3>
+                        {result.productData && (
+                          <span className="shrink-0 inline-flex px-2 py-0.5 bg-violet-100 text-violet-850 text-[10px] font-black font-mono rounded-lg border border-violet-200">
+                            {result.productData.currency === 'INR' ? '₹' : result.productData.currency === 'EUR' ? '€' : '$'}
+                            {result.productData.price}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-zinc-400 font-light leading-relaxed line-clamp-3">{result.description}</p>
                       <span className="mt-2 block text-[10px] text-zinc-300 font-mono overflow-hidden text-ellipsis whitespace-nowrap">{result.url}</span>
                     </div>
+
+                    {/* Geolocation Details Card */}
+                    {result.locationData && (
+                      <div className="bg-zinc-50 border border-zinc-100 rounded-xl p-3 space-y-1.5 font-mono text-[10px] text-zinc-600">
+                        <div className="flex justify-between border-b border-zinc-200/40 pb-1">
+                          <span className="text-zinc-400 font-bold">Latitude</span>
+                          <span className="text-zinc-700 font-medium">{result.locationData.latitude}</span>
+                        </div>
+                        <div className="flex justify-between border-b border-zinc-200/40 pb-1">
+                          <span className="text-zinc-400 font-bold">Longitude</span>
+                          <span className="text-zinc-700 font-medium">{result.locationData.longitude}</span>
+                        </div>
+                        {result.locationData.address && (
+                          <div className="pt-1">
+                            <span className="text-zinc-400 font-bold block mb-1">Full Location Address</span>
+                            <span className="text-zinc-700 font-medium leading-relaxed block">{result.locationData.address}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Product Price Tracker & Timeline */}
+                    {result.productData && (
+                      <div className="p-4 bg-violet-50/40 border border-violet-100 rounded-xl space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-violet-850 flex items-center gap-1.5">
+                            <Sparkles size={12} className="text-violet-600" />
+                            Product Price History Tracker
+                          </span>
+                          <span className="text-sm font-black text-violet-750 font-mono">
+                            Current: {result.productData.currency === 'INR' ? '₹' : result.productData.currency === 'EUR' ? '€' : '$'}
+                            {result.productData.price}
+                          </span>
+                        </div>
+
+                        {result.productData.priceHistory && result.productData.priceHistory.length > 0 ? (
+                          <div className="space-y-1.5">
+                            <span className="text-[9px] text-zinc-400 uppercase font-bold tracking-wider block">Price Timeline (Date & Time)</span>
+                            <div className="max-h-[140px] overflow-y-auto space-y-1 pr-1 scrollbar-thin">
+                              {result.productData.priceHistory.slice().reverse().map((point, index) => {
+                                const dateStr = new Date(point.timestamp).toLocaleString(undefined, {
+                                  dateStyle: 'medium',
+                                  timeStyle: 'short'
+                                });
+                                return (
+                                  <div key={index} className="flex justify-between items-center text-[10px] bg-white px-2.5 py-1.5 rounded-lg border border-zinc-100 font-mono">
+                                    <span className="text-zinc-500 font-semibold">{dateStr}</span>
+                                    <span className="text-zinc-800 font-extrabold">
+                                      {point.currency === 'INR' ? '₹' : point.currency === 'EUR' ? '€' : '$'}
+                                      {point.price}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-zinc-400 font-light block">No previous price records found. Stored current price for future tracking!</span>
+                        )}
+                      </div>
+                    )}
 
                     <a
                       href={result.url}
@@ -4042,16 +4656,380 @@ export default function Home() {
                     </div>
                   </div>
                 )}
-                  </>
-                )}
-              </div>
+              </>
+            )}
             </div>
+          </div>
+        </div>
+      )}
+
+        {/* INLINE PREMIUM CAPTION EDITOR */}
+        {isEditorOpen && (
+          <div 
+            ref={editorRef} 
+            className="w-full mt-10 bg-zinc-950 border border-zinc-900 rounded-3xl p-6 lg:p-8 flex flex-col font-sans text-white antialiased shadow-2xl scroll-mt-24 animate-slide-up-in select-text"
+          >
+            {/* Editor Header */}
+            <div className="pb-5 border-b border-zinc-900 flex items-center justify-between mb-6 select-none">
+              <div className="flex items-center gap-2">
+                <Sparkles className="text-violet-500 animate-pulse" size={20} />
+                <h2 className="text-sm md:text-base font-black tracking-widest uppercase text-zinc-100">Premium Caption Editor</h2>
+              </div>
+              <button 
+                onClick={() => {
+                  setIsEditorOpen(false);
+                  setEditorSubtitles([]);
+                }}
+                className="px-4 py-2 bg-zinc-905 hover:bg-zinc-900 rounded-xl text-xs font-semibold tracking-wider uppercase transition-all cursor-pointer border border-zinc-800/80 hover:text-white"
+              >
+                Exit Editor
+              </button>
+            </div>
+
+            {/* Editor Workspace */}
+            {isResolvingVideo ? (
+              <div className="py-20 flex flex-col items-center justify-center space-y-4 select-none">
+                <LoaderTripleArcs size={60} className="text-violet-500" />
+                <p className="text-zinc-400 text-sm font-medium tracking-wide animate-pulse">Resolving high-speed video stream...</p>
+              </div>
+            ) : (
+              <div className="flex flex-col lg:flex-row gap-6">
+                {/* Left Side: Video Player Container */}
+                <div className="lg:w-3/5 flex flex-col justify-center items-center bg-black/40 border border-zinc-900/60 p-6 rounded-2xl">
+                  <div 
+                    className={`relative w-full rounded-2xl overflow-hidden bg-black border border-zinc-850 shadow-2xl flex items-center justify-center transition-all duration-300 ${
+                      videoAspectRatio === 'portrait' ? 'max-w-[280px] aspect-[9/16] my-4' : 'max-w-2xl aspect-video'
+                    }`}
+                  >
+                    {/* HTML5 Video Player */}
+                    {editorVideoUrl ? (
+                      <video
+                        src={editorVideoUrl}
+                        controls
+                        className="w-full h-full object-contain"
+                        onLoadedMetadata={(e) => {
+                          const video = e.currentTarget;
+                          if (video.videoHeight > video.videoWidth) {
+                            setVideoAspectRatio('portrait');
+                          } else {
+                            setVideoAspectRatio('landscape');
+                          }
+                        }}
+                        onTimeUpdate={(e) => setEditorCurrentTime(e.currentTarget.currentTime)}
+                      />
+                    ) : (
+                      <p className="text-zinc-500 text-xs font-light">Loading video canvas...</p>
+                    )}
+
+                    {/* SYNCED CAPTION OVERLAY */}
+                    {(() => {
+                      const activeSub = editorSubtitles.find(
+                        s => editorCurrentTime >= s.start && editorCurrentTime <= s.end
+                      );
+                      if (!activeSub) return null;
+                      const preset = CAPTION_PRESETS.find(p => p.id === editorStylePreset) || CAPTION_PRESETS[0];
+                      return (
+                        <div 
+                          className="absolute bottom-10 left-6 right-6 flex justify-center text-center pointer-events-none z-10"
+                        >
+                          <span 
+                            style={preset.style as React.CSSProperties}
+                            className="px-4 py-2 text-center select-none animate-scale-up-in shadow-lg"
+                          >
+                            {activeSub.text}
+                          </span>
+                        </div>
+                      );
+                    })()}
+
+                    {/* CUSTOM WATERMARKS/TEXT OVERLAYS */}
+                    {editorExtraOverlays.map((overlay) => {
+                      const isActive = editorCurrentTime >= overlay.start && editorCurrentTime <= overlay.end;
+                      if (!isActive) return null;
+                      return (
+                        <div
+                          key={overlay.id}
+                          style={{
+                            position: 'absolute',
+                            left: `${overlay.x}%`,
+                            top: `${overlay.y}%`,
+                            transform: 'translate(-50%, -50%)',
+                            color: overlay.color,
+                            backgroundColor: overlay.backgroundColor || 'transparent',
+                            fontSize: `${overlay.fontSize}px`,
+                            padding: overlay.backgroundColor !== 'transparent' ? '4px 8px' : '0',
+                            borderRadius: '4px',
+                            pointerEvents: 'none',
+                            fontFamily: 'sans-serif',
+                            fontWeight: 'bold',
+                            textShadow: '1px 1px 2px rgba(0,0,0,0.8)',
+                            zIndex: 20
+                          }}
+                          className="animate-fade-in whitespace-nowrap select-none"
+                        >
+                          {overlay.text}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  
+                  <div className="mt-4 text-[10px] text-zinc-500 tracking-wider text-center max-w-md select-none">
+                    Tip: Press play on the video player. Captions and watermarks will display dynamically on screen in sync with the audio track.
+                  </div>
+                </div>
+
+                {/* Right Side: Configuration Sidebar */}
+                <div className="lg:w-2/5 flex flex-col space-y-6 max-h-[600px] overflow-y-auto pr-2 scrollbar-thin">
+                  
+                  {/* Auto Captions Panel */}
+                  <div className="bg-zinc-900/40 border border-zinc-800/85 p-4.5 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between select-none">
+                      <span className="text-[10px] tracking-widest text-violet-400 font-bold uppercase flex items-center gap-1">
+                        <Sparkles size={11} />
+                        Auto Captions (AI Voice Sync)
+                      </span>
+                      <span className="text-[8px] bg-violet-950 text-violet-400 px-2 py-0.5 rounded font-mono uppercase font-bold tracking-wide border border-violet-900/40">AI Transcribe</span>
+                    </div>
+                    <p className="text-[10px] text-zinc-400 font-light leading-relaxed select-none">
+                      Analyze the audio track to generate styled, voice-synced subtitle segments automatically.
+                    </p>
+                    
+                    {autoCaptionError && (
+                      <div className="p-3 bg-red-955/20 border border-red-900/40 text-red-400 rounded-xl text-[10px] flex items-center gap-1.5 font-light leading-snug">
+                        <AlertCircle size={12} className="shrink-0 text-red-500" />
+                        <span>{autoCaptionError}</span>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleAutoCaption}
+                      disabled={isAutoCaptioning}
+                      className="w-full py-3 bg-violet-650 hover:bg-violet-750 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm border-0"
+                    >
+                      {isAutoCaptioning ? (
+                        <>
+                          <LoaderPulsingDots size={10} className="text-white" />
+                          <span>Generating auto-captions...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={12} />
+                          <span>Auto Generate Synced Captions</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Style Presets Tab */}
+                  <div className="space-y-3">
+                    <span className="text-[10px] tracking-widest text-violet-400 font-bold uppercase flex items-center gap-1 select-none">
+                      <Sparkles size={11} />
+                      Choose Caption Style (20+ presets)
+                    </span>
+                    <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto scrollbar-thin p-1">
+                      {CAPTION_PRESETS.map((preset) => {
+                        const isSel = editorStylePreset === preset.id;
+                        return (
+                          <button
+                            key={preset.id}
+                            onClick={() => setEditorStylePreset(preset.id)}
+                            className={`p-2.5 rounded-xl border text-xs font-semibold text-left transition-all truncate cursor-pointer ${isSel ? 'bg-violet-600 border-violet-500 text-white font-bold scale-102' : 'bg-zinc-800 border-zinc-700/60 text-zinc-300 hover:bg-zinc-750'}`}
+                          >
+                            <span style={{ color: preset.style.color, textShadow: preset.style.textShadow ? '1px 1px 1px #000' : 'none' }}>
+                              {preset.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Subtitles Manager Tab */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] tracking-widest text-emerald-400 font-bold uppercase flex items-center gap-1 select-none">
+                        <FileText size={11} />
+                        Edit Subtitle Sentences
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {editorSubtitles.length > 0 && (
+                          <button
+                            onClick={handleDownloadEditorSubtitles}
+                            className="px-2 py-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 rounded text-[10px] font-bold transition-all cursor-pointer select-none"
+                            title="Download SRT file"
+                          >
+                            Download SRT
+                          </button>
+                        )}
+                        <button
+                          onClick={handleAddSubtitleItem}
+                          className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold transition-all cursor-pointer border-0 select-none"
+                        >
+                          + Add Segment
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1 scrollbar-thin">
+                      {editorSubtitles.length === 0 ? (
+                        <div className="p-6 text-center text-zinc-500 italic text-[11px] bg-zinc-900/20 border border-zinc-900/65 rounded-xl select-none">
+                          No subtitle segments loaded. Use "Auto Generate" or click "+ Add Segment" to begin.
+                        </div>
+                      ) : (
+                        editorSubtitles.map((sub) => (
+                          <div key={sub.index} className="p-3 bg-zinc-800/80 border border-zinc-750/50 rounded-xl space-y-2">
+                            <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 select-none">
+                              <span>Segment #{sub.index}</span>
+                              <div className="flex items-center gap-1">
+                                <span>Start:</span>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  value={sub.start}
+                                  onChange={(e) => handleUpdateSubtitleTimes(sub.index, parseFloat(e.target.value) || 0, sub.end)}
+                                  className="w-12 bg-zinc-700 text-white border-0 text-[10px] text-center rounded py-0.5 focus:ring-1 focus:ring-violet-500 outline-none"
+                                />
+                                <span>s | End:</span>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  value={sub.end}
+                                  onChange={(e) => handleUpdateSubtitleTimes(sub.index, sub.start, parseFloat(e.target.value) || 0)}
+                                  className="w-12 bg-zinc-700 text-white border-0 text-[10px] text-center rounded py-0.5 focus:ring-1 focus:ring-violet-500 outline-none"
+                                />
+                                <button
+                                  onClick={() => handleDeleteSubtitleItem(sub.index)}
+                                  className="ml-2 px-1 text-rose-400 hover:text-rose-500 font-bold cursor-pointer bg-transparent border-0"
+                                  title="Delete sentence"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                            <input
+                              type="text"
+                              value={sub.text}
+                              onChange={(e) => handleUpdateSubtitleText(sub.index, e.target.value)}
+                              className="w-full bg-zinc-905 border-0 focus:ring-1 focus:ring-violet-500 rounded text-xs text-white px-2 py-1.5 font-light outline-none"
+                            />
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Watermarks & Extra Overlays Manager */}
+                  <div className="space-y-3 border-t border-zinc-800 pt-4">
+                    <span className="text-[10px] tracking-widest text-pink-400 font-bold uppercase flex items-center gap-1 select-none">
+                      <Sparkles size={11} />
+                      Add Watermark & Custom Overlays
+                    </span>
+
+                    {/* Overlay inputs */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-zinc-805/40 p-3 rounded-xl border border-zinc-800">
+                      <div className="sm:col-span-2 space-y-1">
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">Overlay Text</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. @watermark"
+                          value={newOverlayText}
+                          onChange={(e) => setNewOverlayText(e.target.value)}
+                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1.5 focus:ring-1 focus:ring-violet-500 outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">Start Time (sec)</label>
+                        <input
+                          type="number"
+                          value={newOverlayStart}
+                          onChange={(e) => setNewOverlayStart(parseFloat(e.target.value) || 0)}
+                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1 focus:ring-1 focus:ring-violet-500 outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">End Time (sec)</label>
+                        <input
+                          type="number"
+                          value={newOverlayEnd}
+                          onChange={(e) => setNewOverlayEnd(parseFloat(e.target.value) || 0)}
+                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1 focus:ring-1 focus:ring-violet-500 outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">X Pos (0 - 100%)</label>
+                        <input
+                          type="number"
+                          value={newOverlayX}
+                          onChange={(e) => setNewOverlayX(parseInt(e.target.value, 10) || 0)}
+                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1 focus:ring-1 focus:ring-violet-500 outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">Y Pos (0 - 100%)</label>
+                        <input
+                          type="number"
+                          value={newOverlayY}
+                          onChange={(e) => setNewOverlayY(parseInt(e.target.value, 10) || 0)}
+                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1 focus:ring-1 focus:ring-violet-500 outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">Font Size (px)</label>
+                        <input
+                          type="number"
+                          value={newOverlayFontSize}
+                          onChange={(e) => setNewOverlayFontSize(parseInt(e.target.value, 10) || 12)}
+                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1 focus:ring-1 focus:ring-violet-500 outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">Color Hex</label>
+                        <input
+                          type="text"
+                          value={newOverlayColor}
+                          onChange={(e) => setNewOverlayColor(e.target.value)}
+                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1 focus:ring-1 focus:ring-violet-500 outline-none"
+                        />
+                      </div>
+                      <div className="sm:col-span-2 pt-2">
+                        <button
+                          onClick={handleAddExtraOverlay}
+                          className="w-full py-2.5 bg-pink-600 hover:bg-pink-700 text-white rounded text-xs font-bold transition-all cursor-pointer border-0"
+                        >
+                          + Add Custom Overlay
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* List of active overlays */}
+                    {editorExtraOverlays.length > 0 && (
+                      <div className="space-y-2 mt-2 max-h-[140px] overflow-y-auto scrollbar-thin">
+                        {editorExtraOverlays.map((o) => (
+                          <div key={o.id} className="flex justify-between items-center text-[11px] bg-zinc-800 p-2.5 rounded-lg border border-zinc-700/40">
+                            <div className="truncate flex-1 pr-2">
+                              <span className="font-bold text-pink-400">"{o.text}"</span>
+                              <span className="text-zinc-500 text-[10px] ml-1.5 font-mono select-none">({o.start}s - {o.end}s, X:{o.x}%, Y:{o.y}%)</span>
+                            </div>
+                            <button
+                              onClick={() => handleDeleteExtraOverlay(o.id)}
+                              className="text-rose-400 hover:text-rose-500 font-bold px-1.5 cursor-pointer bg-transparent border-0"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
 
       {/* Footer copyright */}
-      <footer className="absolute bottom-6 text-center select-none text-[10px] tracking-widest text-zinc-300 font-light">
+      <footer className="mt-16 mb-8 text-center select-none text-[10px] tracking-widest text-zinc-450 font-light relative w-full">
         DESIGN RESOURCE &copy; {new Date().getFullYear()}
       </footer>
 
@@ -4064,6 +5042,81 @@ export default function Home() {
           </filter>
         </defs>
       </svg>
+      {/* AUTH OVERLAY MODAL */}
+      {isAuthModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-zinc-900/90 border border-zinc-850/80 rounded-2xl p-8 shadow-2xl relative z-10 animate-scale-up-in select-text">
+            {/* Close Button */}
+            <button 
+              onClick={() => {
+                setIsAuthModalOpen(false);
+                setAuthError(null);
+              }}
+              className="absolute top-4 right-4 text-zinc-450 hover:text-white text-xs cursor-pointer font-semibold p-1 hover:bg-zinc-800 rounded-lg transition-colors border-0 bg-transparent"
+            >
+              ✕
+            </button>
+
+            <div className="text-center mb-6 select-none">
+              <h2 className="text-xl font-bold text-white tracking-tight">
+                {authModalRequiredLevel === 'pro' && currentUser
+                  ? "PRO Feature Blocked"
+                  : authModalMode === 'signup' 
+                    ? "Register for unlock more features" 
+                    : "Welcome back"}
+              </h2>
+              <p className="text-xs text-zinc-400 mt-1.5">
+                {authModalRequiredLevel === 'pro' && currentUser
+                  ? "Standard accounts cannot access this high-cost resource."
+                  : authModalMode === 'signup'
+                    ? "Create an account to run deep scans, AI summaries, and unlimited previews."
+                    : "Enter your credentials to access your saved workspace."}
+              </p>
+            </div>
+
+            {/* If they are standard user logged in, but try to use pro features, show Upgrade callout */}
+            {authModalRequiredLevel === 'pro' && currentUser && currentUser.role !== 'pro' ? (
+              <div className="space-y-4">
+                <div className="p-4 bg-violet-950/20 border border-violet-900/40 text-violet-300 rounded-xl text-xs space-y-1.5 leading-relaxed">
+                  <span className="font-semibold block text-white">Upgrade to Premium Tier Required</span>
+                  <span>To unlock Pro features (like AI background removal and creative writing tools), please request the administrator to upgrade your account to <strong className="text-violet-400">pro</strong> role.</span>
+                  <span className="block mt-2 font-mono text-[10px] text-zinc-500">Admin contact: shashank8808108802@gmail.com</span>
+                </div>
+                <button
+                  onClick={() => setIsAuthModalOpen(false)}
+                  className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-semibold cursor-pointer border border-zinc-700/50"
+                >
+                  Close Prompt
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <SignInButton mode="modal">
+                  <button
+                    className="w-full py-3.5 bg-violet-650 hover:bg-violet-750 text-white font-semibold rounded-xl text-xs transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 border-0"
+                  >
+                    <span>{authModalMode === 'signup' ? 'Sign Up with Google' : 'Sign In with Google'}</span>
+                  </button>
+                </SignInButton>
+
+                <div className="text-center pt-2 select-none">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthModalMode(authModalMode === 'signup' ? 'login' : 'signup');
+                    }}
+                    className="text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer border-0 bg-transparent"
+                  >
+                    {authModalMode === 'signup' 
+                      ? "Already have an account? Sign In" 
+                      : "Don't have an account? Register"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

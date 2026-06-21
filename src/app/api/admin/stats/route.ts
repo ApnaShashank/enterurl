@@ -4,17 +4,12 @@ import { cookies } from 'next/headers';
 import { connectToDatabase } from '@/lib/db';
 import ApiUsageLog from '@/models/ApiUsageLog';
 import Feedback from '@/models/Feedback';
+import User from '@/models/User';
 
 async function verifyAdmin() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
-  if (!token) return false;
-  
-  const adminEmail = process.env.ADMIN_EMAIL || 'shashank8808108802@gmail.com';
-  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
-  
-  const expectedToken = crypto.createHmac('sha256', adminPassword).update(adminEmail).digest('hex');
-  return token === expectedToken;
+  const { getCurrentUser } = await import('@/lib/auth');
+  const user = await getCurrentUser();
+  return user !== null && user.role === 'admin';
 }
 
 export async function GET(request: NextRequest) {
@@ -39,7 +34,8 @@ export async function GET(request: NextRequest) {
     if (search) {
       query.$or = [
         { ip: { $regex: search, $options: 'i' } },
-        { url: { $regex: search, $options: 'i' } }
+        { url: { $regex: search, $options: 'i' } },
+        { userEmail: { $regex: search, $options: 'i' } }
       ];
     }
     if (actionFilter) {
@@ -49,6 +45,8 @@ export async function GET(request: NextRequest) {
     // 1. Fetch metrics
     const totalScans = await ApiUsageLog.countDocuments();
     const uniqueUsers = (await ApiUsageLog.distinct('ip')).length;
+    const totalUsers = await User.countDocuments();
+    const proUsers = await User.countDocuments({ role: 'pro' });
     
     const startOfToday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const todayScans = await ApiUsageLog.countDocuments({ timestamp: { $gte: startOfToday } });
@@ -124,6 +122,8 @@ export async function GET(request: NextRequest) {
         totalScans,
         uniqueUsers,
         todayScans,
+        totalUsers,
+        proUsers,
         configuredKeysCount: Object.values(apiKeysStatus).filter(Boolean).length,
         totalKeysCount: Object.keys(apiKeysStatus).length
       },

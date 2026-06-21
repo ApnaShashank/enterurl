@@ -10,6 +10,17 @@ export async function POST(request: NextRequest) {
     ip = ip.split(',')[0].trim();
   }
 
+  // Auth gate check
+  const { checkFeaturePermission } = await import('@/lib/auth');
+  const permission = await checkFeaturePermission('remove-bg');
+  if (!permission.authorized) {
+    return NextResponse.json({
+      success: false,
+      error: 'Access Restricted',
+      requiredLevel: permission.requiredLevel
+    }, { status: 403 });
+  }
+
   try {
     await connectToDatabase();
   } catch (dbErr) {
@@ -58,7 +69,8 @@ export async function POST(request: NextRequest) {
           platform: 'image',
           apiUsed: 'Remove.bg',
           status: 'failed',
-          errorMessage: `Status ${response.status}: ${response.statusText}`
+          errorMessage: `Status ${response.status}: ${response.statusText}`,
+          userEmail: permission.user?.email
         });
       } catch (logErr) {}
 
@@ -81,7 +93,8 @@ export async function POST(request: NextRequest) {
         url: targetImageUrl,
         platform: 'image',
         apiUsed: 'Remove.bg',
-        status: 'success'
+        status: 'success',
+        userEmail: permission.user?.email
       });
     } catch (logErr) {}
 
@@ -102,7 +115,8 @@ export async function POST(request: NextRequest) {
         platform: 'image',
         apiUsed: 'Remove.bg',
         status: 'failed',
-        errorMessage: error.message
+        errorMessage: error.message,
+        userEmail: permission.user?.email
       });
     } catch (logErr) {}
     return NextResponse.json({ success: false, error: error.message || 'Internal server error' }, { status: 500 });

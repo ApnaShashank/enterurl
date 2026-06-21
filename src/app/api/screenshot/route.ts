@@ -24,6 +24,17 @@ export async function POST(request: NextRequest) {
     ip = ip.split(',')[0].trim();
   }
 
+  // Auth gate check
+  const { checkFeaturePermission } = await import('@/lib/auth');
+  const permission = await checkFeaturePermission('screenshot');
+  if (!permission.authorized) {
+    return NextResponse.json({
+      success: false,
+      error: 'Access Restricted',
+      requiredLevel: permission.requiredLevel
+    }, { status: 403 });
+  }
+
   try {
     await connectToDatabase();
   } catch (dbErr) {
@@ -139,7 +150,8 @@ export async function POST(request: NextRequest) {
         url: targetUrl,
         platform: 'website',
         apiUsed,
-        status: 'success'
+        status: 'success',
+        userEmail: permission.user?.email
       });
     } catch (logErr) {}
 
@@ -159,7 +171,8 @@ export async function POST(request: NextRequest) {
         platform: 'website',
         apiUsed: 'Screenshot API',
         status: 'failed',
-        errorMessage: error.message
+        errorMessage: error.message,
+        userEmail: permission.user?.email
       });
     } catch (logErr) {}
 

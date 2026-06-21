@@ -23,6 +23,17 @@ export async function POST(request: NextRequest) {
     ip = ip.split(',')[0].trim();
   }
 
+  // Auth gate check
+  const { checkFeaturePermission } = await import('@/lib/auth');
+  const permission = await checkFeaturePermission('transcribe');
+  if (!permission.authorized) {
+    return NextResponse.json({
+      success: false,
+      error: 'Access Restricted',
+      requiredLevel: permission.requiredLevel
+    }, { status: 403 });
+  }
+
   try {
     await connectToDatabase();
   } catch (dbErr) {
@@ -105,7 +116,12 @@ export async function POST(request: NextRequest) {
           const dgData = await deepgramRes.json();
           const transcriptText = dgData.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
           const confidence = dgData.results?.channels?.[0]?.alternatives?.[0]?.confidence || null;
-          const words = dgData.results?.channels?.[0]?.alternatives?.[0]?.words || null;
+          const rawWords = dgData.results?.channels?.[0]?.alternatives?.[0]?.words || null;
+          const words = rawWords ? rawWords.map((w: any) => ({
+            text: w.punctuated_word || w.word,
+            start: Math.round(w.start * 1000),
+            end: Math.round(w.end * 1000)
+          })) : null;
 
           if (transcriptText) {
             deepgramResult = {
@@ -134,7 +150,8 @@ export async function POST(request: NextRequest) {
           url: targetAudioUrl,
           platform: 'audio',
           apiUsed: 'Deepgram',
-          status: 'success'
+          status: 'success',
+          userEmail: permission.user?.email
         });
       } catch (logErr) {}
 
@@ -167,7 +184,8 @@ export async function POST(request: NextRequest) {
           platform: 'audio',
           apiUsed: 'AssemblyAI',
           status: 'failed',
-          errorMessage: `Status ${response.status}: ${err}`
+          errorMessage: `Status ${response.status}: ${err}`,
+          userEmail: permission.user?.email
         });
       } catch (logErr) {}
 
@@ -183,7 +201,8 @@ export async function POST(request: NextRequest) {
         url: targetAudioUrl,
         platform: 'audio',
         apiUsed: 'AssemblyAI',
-        status: 'success'
+        status: 'success',
+        userEmail: permission.user?.email
       });
     } catch (logErr) {}
 
@@ -199,7 +218,8 @@ export async function POST(request: NextRequest) {
         platform: 'audio',
         apiUsed: 'AssemblyAI',
         status: 'failed',
-        errorMessage: error.message
+        errorMessage: error.message,
+        userEmail: permission.user?.email
       });
     } catch (logErr) {}
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -211,6 +231,16 @@ export async function GET(request: NextRequest) {
   try {
     if (!ASSEMBLYAI_API_KEY) {
       return NextResponse.json({ success: false, error: 'AssemblyAI API key not configured' }, { status: 500 });
+    }
+
+    const { checkFeaturePermission } = await import('@/lib/auth');
+    const permission = await checkFeaturePermission('transcribe');
+    if (!permission.authorized) {
+      return NextResponse.json({
+        success: false,
+        error: 'Access Restricted',
+        requiredLevel: permission.requiredLevel
+      }, { status: 403 });
     }
 
     const { searchParams } = new URL(request.url);

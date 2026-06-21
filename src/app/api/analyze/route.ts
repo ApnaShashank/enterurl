@@ -5,6 +5,9 @@ import tls from 'tls';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { connectToDatabase } from '@/lib/db';
 import ApiUsageLog from '@/models/ApiUsageLog';
+import puppeteer from 'puppeteer';
+import fs from 'fs';
+import ProductPriceHistory from '@/models/ProductPriceHistory';
 
 const WHOISXML_API_KEY = process.env.WHOISXML_API_KEY || '';
 const IPINFO_TOKEN = process.env.IPINFO_TOKEN || '';
@@ -14,6 +17,294 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const XAI_API_KEY = process.env.XAI_API_KEY || '';
+
+function getExecutablePath(): string | undefined {
+  const paths = [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
+  ];
+  for (const p of paths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return undefined;
+}
+
+function parseCoordinates(urlStr: string): { latitude: number; longitude: number } | null {
+  const clean = urlStr.trim();
+  // Match geo URI, e.g. geo:26.0739,83.1859
+  const geoMatch = clean.match(/^geo:\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/i);
+  if (geoMatch) {
+    return {
+      latitude: parseFloat(geoMatch[1]),
+      longitude: parseFloat(geoMatch[2])
+    };
+  }
+  // Match plain coordinate pair, e.g. 26.0739, 83.1859 (with optional query parameters)
+  const coordsMatch = clean.match(/^([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)(?:\?.*)?$/);
+  if (coordsMatch) {
+    return {
+      latitude: parseFloat(coordsMatch[1]),
+      longitude: parseFloat(coordsMatch[2])
+    };
+  }
+  return null;
+}
+
+async function fetchAddressFromCoordinates(lat: number, lon: number): Promise<string> {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) LinkToPreview/1.0'
+      },
+      signal: AbortSignal.timeout(4000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.display_name || '';
+    }
+  } catch (e) {
+    console.error('Nominatim lookup failed:', e);
+  }
+  return '';
+}
+
+function extractCoordinatesFromGoogleMapsUrl(urlStr: string): { latitude: number; longitude: number } | null {
+  try {
+    const parsed = new URL(urlStr);
+    const path = parsed.pathname;
+    const match = path.match(/@\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+    if (match) {
+      return {
+        latitude: parseFloat(match[1]),
+        longitude: parseFloat(match[2])
+      };
+    }
+    const q = parsed.searchParams.get('q');
+    if (q) {
+      const qMatch = q.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+      if (qMatch) {
+        return {
+          latitude: parseFloat(qMatch[1]),
+          longitude: parseFloat(qMatch[2])
+        };
+      }
+    }
+    const ll = parsed.searchParams.get('ll');
+    if (ll) {
+      const llMatch = ll.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+      if (llMatch) {
+        return {
+          latitude: parseFloat(llMatch[1]),
+          longitude: parseFloat(llMatch[2])
+        };
+      }
+    }
+  } catch {}
+  return null;
+}
+
+async function checkAndParseMaps(
+  finalUrl: string,
+  redirectChain: string[],
+  responseHeadersObj: Record<string, string>,
+  ipAddress: string,
+  dnsRecords: any[],
+  sendResponse: (data: any) => Promise<any>
+): Promise<any | null> {
+  const isMapsUrl = /(google\.[a-z.]+\/maps|maps\.google|maps\.app\.goo\.gl)/i.test(finalUrl) || 
+                     redirectChain.some(r => /(google\.[a-z.]+\/maps|maps\.google|maps\.app\.goo\.gl)/i.test(r));
+  if (isMapsUrl) {
+    const coords = extractCoordinatesFromGoogleMapsUrl(finalUrl);
+    if (coords) {
+      const { latitude, longitude } = coords;
+      const address = await fetchAddressFromCoordinates(latitude, longitude);
+      const title = address ? address.split(',')[0] : 'Google Maps Location';
+      const description = address || `Google Maps coordinates: ${latitude}, ${longitude}`;
+      return await sendResponse({
+        success: true,
+        url: finalUrl,
+        domain: getDomainName(finalUrl),
+        platform: 'website',
+        contentType: 'website',
+        title,
+        description,
+        embedUrl: `https://maps.google.com/maps?q=${latitude},${longitude}&z=15&output=embed`,
+        locationData: {
+          latitude,
+          longitude,
+          address,
+          embedUrl: `https://maps.google.com/maps?q=${latitude},${longitude}&z=15&output=embed`
+        },
+        linkIntel: {
+          redirectChain,
+          ipAddress,
+          dnsRecords,
+          safe: true,
+          shortUrl: '',
+          headers: responseHeadersObj
+        }
+      });
+    }
+  }
+  return null;
+}
+
+async function fetchHtmlWithPuppeteerFallback(targetUrl: string, fallbackDomain: string): Promise<string> {
+  let html = '';
+  try {
+    const ctrlr = new AbortController();
+    const tid = setTimeout(() => ctrlr.abort(), 8000);
+    const gr = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
+      signal: ctrlr.signal,
+    });
+    clearTimeout(tid);
+    if (gr.ok) {
+      html = await gr.text();
+    }
+  } catch (err: any) {
+    console.warn(`Direct fetch failed for ${targetUrl}:`, err.message);
+  }
+
+  const isLinkedInOrAmazon = /(linkedin\.com|amazon\.)/i.test(fallbackDomain);
+  const isBlocked = !html || html.length < 1500 || /block|robot|captcha|security challenge/i.test(html);
+  
+  if (isLinkedInOrAmazon || isBlocked) {
+    console.log(`Puppeteer fallback scraper initiated for ${targetUrl} (Domain: ${fallbackDomain})`);
+    const execPath = getExecutablePath();
+    if (execPath) {
+      let browser = null;
+      try {
+        browser = await puppeteer.launch({
+          executablePath: execPath,
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-web-security'
+          ]
+        });
+        const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+        await page.setViewport({ width: 1280, height: 800 });
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 12000 });
+        html = await page.content();
+      } catch (puppeteerErr: any) {
+        console.error('Puppeteer scraper fallback error:', puppeteerErr.message);
+      } finally {
+        if (browser) {
+          await browser.close();
+        }
+      }
+    }
+  }
+  return html;
+}
+
+interface ParsedPrice {
+  price: number;
+  currency: string;
+}
+
+function extractProductPrice(htmlText: string, $: cheerio.CheerioAPI): ParsedPrice | null {
+  try {
+    const jsonLdBlocks = $('script[type="application/ld+json"]');
+    for (let i = 0; i < jsonLdBlocks.length; i++) {
+      try {
+        const text = $(jsonLdBlocks[i]).text().trim();
+        if (!text) continue;
+        const data = JSON.parse(text);
+        const items = Array.isArray(data) ? data : [data];
+        for (const item of items) {
+          const graphItems = item['@graph'] && Array.isArray(item['@graph']) ? item['@graph'] : [item];
+          for (const graphItem of graphItems) {
+            if (graphItem['@type'] === 'Product' || graphItem['@type']?.includes('Product')) {
+              const offers = graphItem.offers;
+              if (offers) {
+                const offerList = Array.isArray(offers) ? offers : [offers];
+                for (const offer of offerList) {
+                  if (offer.price !== undefined) {
+                    const priceVal = parseFloat(String(offer.price).replace(/[^0-9.]/g, ''));
+                    const currencyVal = offer.priceCurrency || 'USD';
+                    if (!isNaN(priceVal) && priceVal > 0) {
+                      return { price: priceVal, currency: currencyVal };
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+
+    const ogPriceAmount = $('meta[property="product:price:amount"]').attr('content') || 
+                          $('meta[property="og:price:amount"]').attr('content');
+    const ogPriceCurrency = $('meta[property="product:price:currency"]').attr('content') || 
+                            $('meta[property="og:price:currency"]').attr('content') || 'USD';
+    if (ogPriceAmount) {
+      const priceVal = parseFloat(ogPriceAmount.replace(/[^0-9.]/g, ''));
+      if (!isNaN(priceVal) && priceVal > 0) {
+        return { price: priceVal, currency: ogPriceCurrency };
+      }
+    }
+
+    const itempropPrice = $('[itemprop="price"]').attr('content') || $('[itemprop="price"]').text();
+    const itempropCurrency = $('[itemprop="priceCurrency"]').attr('content') || 'USD';
+    if (itempropPrice) {
+      const priceVal = parseFloat(String(itempropPrice).replace(/[^0-9.]/g, ''));
+      if (!isNaN(priceVal) && priceVal > 0) {
+        return { price: priceVal, currency: itempropCurrency };
+      }
+    }
+
+    const amazonPriceText = $('.a-price .a-offscreen').first().text().trim() || 
+                            $('#priceblock_ourprice').text().trim() || 
+                            $('#priceblock_dealprice').text().trim() ||
+                            $('.priceblock_ourprice').text().trim();
+    if (amazonPriceText) {
+      const clean = amazonPriceText.replace(/,/g, '');
+      const match = clean.match(/(?:Rs\.?|₹|EUR|€|\$)\s*([0-9.]+)/i) || clean.match(/([0-9.]+)/);
+      if (match) {
+        const priceVal = parseFloat(match[1]);
+        let currencyVal = 'USD';
+        if (amazonPriceText.includes('₹') || amazonPriceText.includes('Rs')) currencyVal = 'INR';
+        else if (amazonPriceText.includes('€') || amazonPriceText.includes('EUR')) currencyVal = 'EUR';
+        if (!isNaN(priceVal) && priceVal > 0) {
+          return { price: priceVal, currency: currencyVal };
+        }
+      }
+    }
+
+    const priceElements = $('[class*="price"], [id*="price"]');
+    for (let i = 0; i < priceElements.length; i++) {
+      const elText = $(priceElements[i]).text().trim();
+      if (elText && elText.length < 30) {
+        const clean = elText.replace(/,/g, '');
+        const match = clean.match(/(?:Rs\.?|₹|EUR|€|\$)\s*([0-9.]+)/i);
+        if (match) {
+          const priceVal = parseFloat(match[1]);
+          let currencyVal = 'USD';
+          if (elText.includes('₹') || elText.includes('Rs')) currencyVal = 'INR';
+          else if (elText.includes('€') || elText.includes('EUR')) currencyVal = 'EUR';
+          if (!isNaN(priceVal) && priceVal > 0) {
+            return { price: priceVal, currency: currencyVal };
+          }
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
+
 
 function getDomainName(urlStr: string): string {
   try { return new URL(urlStr).hostname.replace('www.', ''); } catch { return 'unknown'; }
@@ -690,6 +981,38 @@ export async function POST(request: NextRequest) {
     console.error('Failed to parse request body:', err);
   }
 
+  let currentUserEmail: string | undefined = undefined;
+  try {
+    const { getCurrentUser } = await import('@/lib/auth');
+    const user = await getCurrentUser();
+    if (user) {
+      currentUserEmail = user.email;
+    }
+  } catch (err) {
+    console.error('getCurrentUser failed in analyze route:', err);
+  }
+
+  // Auth gate check for paid/heavy scans
+  if (['intel', 'lighthouse', 'ai-research', 'ai-writer', 'trust-safety'].includes(scanType)) {
+    const featureName = scanType === 'trust-safety' ? 'analyze-intel' : `analyze-${scanType}`;
+    try {
+      const { checkFeaturePermission } = await import('@/lib/auth');
+      const permission = await checkFeaturePermission(featureName);
+      if (!permission.authorized) {
+        return NextResponse.json({
+          success: false,
+          error: 'Access Restricted',
+          requiredLevel: permission.requiredLevel
+        }, { status: 403 });
+      }
+      if (permission.user) {
+        currentUserEmail = permission.user.email;
+      }
+    } catch (authGateErr) {
+      console.error('Auth gate check failed:', authGateErr);
+    }
+  }
+
   // Connect to database
   try {
     await connectToDatabase();
@@ -724,7 +1047,8 @@ export async function POST(request: NextRequest) {
         platform: data.platform || 'website',
         apiUsed: apis.join(', '),
         status: isSuccess ? 'success' : 'failed',
-        errorMessage: isSuccess ? undefined : (data.error || 'Unknown error')
+        errorMessage: isSuccess ? undefined : (data.error || 'Unknown error'),
+        userEmail: currentUserEmail
       });
     } catch (logErr) {
       console.error('MongoDB Logging failed:', logErr);
@@ -737,8 +1061,8 @@ export async function POST(request: NextRequest) {
       return await sendResponse({ success: false, error: 'URL is required' }, 400);
     }
 
-    // Enforce 10 links per 24 hours rate limit
-    if (scanType === 'base' || !scanType) {
+    // Enforce 10 links per 24 hours rate limit for anonymous scans
+    if ((scanType === 'base' || !scanType) && !currentUserEmail) {
       const startOf24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
       try {
         const count = await ApiUsageLog.countDocuments({
@@ -749,7 +1073,7 @@ export async function POST(request: NextRequest) {
         if (count >= 10) {
           return await sendResponse({
             success: false,
-            error: 'Daily limit of 10 link detections reached. Please try again tomorrow.'
+            error: 'Daily limit of 10 link detections reached. Please register/log in to unlock unlimited scans.'
           }, 429);
         }
       } catch (limitErr) {
@@ -759,6 +1083,40 @@ export async function POST(request: NextRequest) {
 
     const url = cleanUrl(rawUrl);
     const originalDomain = getDomainName(url);
+
+    // Intercept Geolocation coordinates / Geo URIs early
+    const parsedCoords = parseCoordinates(rawUrl);
+    if (parsedCoords) {
+      const { latitude, longitude } = parsedCoords;
+      const address = await fetchAddressFromCoordinates(latitude, longitude);
+      const title = address ? address.split(',')[0] : 'Map Location';
+      const description = address || `Coordinates: ${latitude}, ${longitude}`;
+      
+      return await sendResponse({
+        success: true,
+        url: `https://www.google.com/maps?q=${latitude},${longitude}`,
+        domain: 'maps.google.com',
+        platform: 'website',
+        contentType: 'website',
+        title,
+        description,
+        embedUrl: `https://maps.google.com/maps?q=${latitude},${longitude}&z=15&output=embed`,
+        locationData: {
+          latitude,
+          longitude,
+          address,
+          embedUrl: `https://maps.google.com/maps?q=${latitude},${longitude}&z=15&output=embed`
+        },
+        linkIntel: {
+          redirectChain: [rawUrl],
+          ipAddress: '8.8.8.8',
+          dnsRecords: [{ type: 'A (Google Maps)', records: ['8.8.8.8'] }],
+          safe: true,
+          shortUrl: '',
+          headers: {}
+        }
+      });
+    }
 
     // Early interception for lazy-loaded scan types that only target websites
     if (scanType === 'intel' || scanType === 'lighthouse' || scanType === 'ai-research' || scanType === 'trust-safety') {
@@ -799,6 +1157,9 @@ export async function POST(request: NextRequest) {
         } catch (e) { console.error('DNS lookup failed:', e); }
       }
 
+      const mapsResponse = await checkAndParseMaps(finalUrl, redirectChain, responseHeadersObj, ipAddress, dnsRecords, sendResponse);
+      if (mapsResponse) return mapsResponse;
+
       if (scanType === 'intel') {
         const [shortUrlR, vtR, ipInfoR, whoisR, sslR, robotsR] = await Promise.allSettled([
           getShortUrl(finalUrl),
@@ -827,17 +1188,7 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      let htmlTextContent = '';
-      try {
-        const ctrlr = new AbortController();
-        const tid = setTimeout(() => ctrlr.abort(), 8000);
-        const gr = await fetch(finalUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' },
-          signal: ctrlr.signal,
-        });
-        clearTimeout(tid);
-        htmlTextContent = await gr.text();
-      } catch {}
+      const htmlTextContent = await fetchHtmlWithPuppeteerFallback(finalUrl, finalDomain);
 
       const cheerioInstance = cheerio.load(htmlTextContent);
 
@@ -1005,6 +1356,9 @@ export async function POST(request: NextRequest) {
         dnsRecords.push({ type: 'A (IPv4 Address)', records: [ipAddress] });
       } catch (e) { console.error('DNS lookup failed:', e); }
     }
+
+    const mapsResponse = await checkAndParseMaps(finalUrl, redirectChain, responseHeadersObj, ipAddress, dnsRecords, sendResponse);
+    if (mapsResponse) return mapsResponse;
 
     // --- Direct media paths (early return with link intel) ---
     if (isDirectImage || isDirectVideo || isDirectAudio) {
@@ -1387,17 +1741,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ---- GENERAL WEBSITE (with full intelligence) ----
-    htmlText = '';
-    try {
-      const ctrlr = new AbortController();
-      const tid = setTimeout(() => ctrlr.abort(), 8000);
-      const gr = await fetch(finalUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' },
-        signal: ctrlr.signal,
-      });
-      clearTimeout(tid);
-      htmlText = await gr.text();
-    } catch {}
+    htmlText = await fetchHtmlWithPuppeteerFallback(finalUrl, finalDomain);
 
     $ = cheerio.load(htmlText);
     const getMeta = (names: string[]) => { for (const n of names) { const c = $(`meta[property="${n}"]`).attr('content') || $(`meta[name="${n}"]`).attr('content') || $(`meta[itemprop="${n}"]`).attr('content'); if (c) return c.trim(); } return ''; };
@@ -1432,6 +1776,55 @@ export async function POST(request: NextRequest) {
     // Detect tech stack using advanced engine
     const techStack = detectTechStack(htmlText, responseHeadersObj);
 
+    // Product Price parsing & history logging
+    const parsedPrice = extractProductPrice(htmlText, $);
+    let productData = null;
+    if (parsedPrice) {
+      try {
+        let record = await ProductPriceHistory.findOne({ url: finalUrl });
+        const currentPricePoint = {
+          price: parsedPrice.price,
+          currency: parsedPrice.currency,
+          timestamp: new Date()
+        };
+
+        if (!record) {
+          record = await ProductPriceHistory.create({
+            url: finalUrl,
+            domain: finalDomain,
+            title: parsedTitle || finalDomain,
+            priceHistory: [currentPricePoint]
+          });
+        } else {
+          const lastEntry = record.priceHistory[record.priceHistory.length - 1];
+          const isPriceChanged = lastEntry.price !== parsedPrice.price || lastEntry.currency !== parsedPrice.currency;
+          const oneHour = 60 * 60 * 1000;
+          const isTimePassed = Date.now() - new Date(lastEntry.timestamp).getTime() > oneHour;
+
+          if (isPriceChanged || isTimePassed) {
+            record.priceHistory.push(currentPricePoint);
+            if (record.priceHistory.length > 50) {
+              record.priceHistory.shift();
+            }
+            await record.save();
+          }
+        }
+
+        productData = {
+          price: parsedPrice.price,
+          currency: parsedPrice.currency,
+          title: parsedTitle || finalDomain,
+          priceHistory: record.priceHistory.map((h: any) => ({
+            price: h.price,
+            currency: h.currency,
+            timestamp: h.timestamp.toISOString()
+          }))
+        };
+      } catch (dbErr) {
+        console.error('Failed to log product price history:', dbErr);
+      }
+    }
+
     if (scanType === 'ai-writer') {
       const aiData = await generateAiContentGemini(parsedTitle, parsedDesc, 'Website', finalDomain) || { ...generateAiTemplate(parsedTitle, parsedDesc, 'Website'), hashtags };
       return await sendResponse({
@@ -1447,6 +1840,7 @@ export async function POST(request: NextRequest) {
       embedUrl: ogVideo || undefined, author: author || undefined, hashtags,
       techStack: techStack.length > 0 ? techStack : undefined,
       developerSpecs: extractDeveloperSpecs(htmlText, finalUrl),
+      productData: productData || undefined,
       linkIntel: {
         redirectChain, ipAddress, dnsRecords,
         safe: true,
@@ -1474,13 +1868,23 @@ async function buildDirectMediaResponse(
   ip: string,
   scanType: string
 ) {
+  let userEmail: string | undefined = undefined;
+  try {
+    const { getCurrentUser } = await import('@/lib/auth');
+    const user = await getCurrentUser();
+    if (user) {
+      userEmail = user.email;
+    }
+  } catch {}
+
   try {
     await ApiUsageLog.create({
       ip,
       action: `analyze-${scanType}`,
       url,
       platform,
-      status: 'success'
+      status: 'success',
+      userEmail
     });
   } catch (logErr) {
     console.error('Direct media logging failed:', logErr);

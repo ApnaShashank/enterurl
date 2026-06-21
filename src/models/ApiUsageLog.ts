@@ -9,6 +9,7 @@ export interface IApiUsageLog extends Document {
   apiUsed?: string;
   status: string;
   errorMessage?: string;
+  userEmail?: string;
 }
 
 const ApiUsageLogSchema: Schema = new Schema({
@@ -19,8 +20,10 @@ const ApiUsageLogSchema: Schema = new Schema({
   platform: { type: String },
   apiUsed: { type: String },
   status: { type: String, required: true },
-  errorMessage: { type: String }
+  errorMessage: { type: String },
+  userEmail: { type: String }
 });
 
 // Avoid Re-compilation of Model in Next.js Hot Reload
 export default mongoose.models.ApiUsageLog || mongoose.model<IApiUsageLog>('ApiUsageLog', ApiUsageLogSchema);
+
