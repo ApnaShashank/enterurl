@@ -2145,7 +2145,7 @@ export default function Home() {
     : getPlatformMatchKey(rollingIndex);
 
   return (
-    <div className="relative flex flex-col flex-1 items-center justify-start min-h-screen z-10 px-4 md:px-8 py-12 dots-bg select-none">
+    <div className="relative flex flex-col items-center justify-between h-screen max-h-screen overflow-hidden z-10 px-4 md:px-8 py-4 md:py-6 dots-bg select-none">
       
       {/* Floating User Account Pill at top right */}
       <div className="absolute top-6 right-6 z-35 flex items-center gap-2">
@@ -2200,27 +2200,31 @@ export default function Home() {
       <div className="ambient-glow"></div>
 
       {/* Website logo centered at top (in-flow, not absolute) */}
-      <header className={`w-full flex justify-center select-none z-10 transition-all duration-500 ease-in-out ${isLoading || result ? 'mb-2' : 'mb-6'}`}>
+      <header className={`w-full flex justify-center select-none z-10 transition-all duration-500 ease-in-out ${isLoading || result ? 'mb-1.5' : 'mb-4'}`}>
         <img 
           src="/logo.png" 
           alt="EnterURL logo" 
-          className={`w-auto object-contain select-none transition-all duration-500 ease-in-out ${isLoading || result ? 'h-16 md:h-20' : 'h-32 md:h-44'}`}
+          className={`w-auto object-contain select-none transition-all duration-500 ease-in-out ${isLoading || result ? 'h-10 md:h-12' : 'h-20 md:h-28'}`}
         />
       </header>
 
       {/* Hero Container */}
-      <main className="w-full max-w-3xl flex flex-col items-center justify-start text-center z-10">
+      <main className={`w-full max-w-3xl flex-1 flex flex-col items-center text-center z-10 overflow-hidden ${
+        isLoading || result ? 'justify-start' : 'justify-center'
+      }`}>
         
         {/* Typographical Editorial Header */}
-        <div className="mb-8 animate-fade-in">
-          <h1 className="text-4xl md:text-5xl lg:text-6xl font-light tracking-tight text-zinc-900 leading-none">
-            Detect & Extract <br />
-            <span className="font-semibold text-zinc-800">Any Content.</span>
-          </h1>
-          <p className="mt-4 text-sm md:text-base text-zinc-400 font-light max-w-md mx-auto">
-            Paste links from Instagram, YouTube, Pinterest, Reddit, TikTok, and more. Real-time platform identification and deep asset extraction.
-          </p>
-        </div>
+        {!result && !isLoading && (
+          <div className="mb-4 md:mb-6 animate-fade-in select-none">
+            <h1 className="text-3xl md:text-4xl lg:text-5xl font-light tracking-tight text-zinc-900 leading-none">
+              Detect & Extract <br />
+              <span className="font-semibold text-zinc-800">Any Content.</span>
+            </h1>
+            <p className="mt-3 text-xs md:text-sm text-zinc-400 font-light max-w-md mx-auto">
+              Paste links from Instagram, YouTube, Pinterest, Reddit, TikTok, and more. Real-time platform identification and deep asset extraction.
+            </p>
+          </div>
+        )}
 
         {/* Dynamic Scan Input Wrapper */}
         <div className={`w-full relative custom-card p-2.5 rounded-2xl flex flex-col justify-between ${isShaking ? 'animate-shake' : ''}`}>
@@ -2308,7 +2312,10 @@ export default function Home() {
           </div>
         </div>
 
-        {/* SCANNER STATS MODULE: Platform detector and asset listing */}
+        {/* Scrollable Content Area */}
+        {(isLoading || result || error || isEditorOpen) && (
+          <div className="w-full flex-1 overflow-y-auto mt-4 pr-1.5 pb-6 scrollbar-thin flex flex-col gap-4 text-left">
+            {/* SCANNER STATS MODULE: Platform detector and asset listing */}
         {(isLoading || result) && (
           <div className="w-full mt-5 flex flex-col sm:flex-row items-center justify-between gap-4 text-left animate-slide-up-in">
             
@@ -5027,28 +5034,30 @@ export default function Home() {
             )}
           </div>
         )}
+          </div>
+        )}
       </main>
 
       {/* Premium SEO directory footer */}
-      <footer className="mt-20 mb-8 w-full max-w-xl mx-auto border-t border-zinc-200/60 pt-6 px-4 text-center select-none">
-        <div className="flex flex-wrap justify-center items-center gap-x-6 gap-y-2.5 text-[11px] font-medium text-zinc-400">
+      <footer className="mt-6 mb-2 w-full max-w-xl mx-auto border-t border-zinc-200/60 pt-4 px-4 text-center select-none">
+        <div className="flex flex-nowrap justify-center items-center gap-x-2.5 sm:gap-x-5 text-[9px] sm:text-[11px] font-medium text-zinc-400 whitespace-nowrap overflow-x-auto scrollbar-none w-full max-w-full">
           <Link href="/about" className="hover:text-zinc-700 transition-colors">About Us</Link>
-          <span className="text-zinc-200">•</span>
+          <span className="text-zinc-200 select-none">•</span>
           <Link href="/privacy" className="hover:text-zinc-700 transition-colors">Privacy Policy</Link>
-          <span className="text-zinc-200">•</span>
+          <span className="text-zinc-200 select-none">•</span>
           <Link href="/terms" className="hover:text-zinc-700 transition-colors">Terms of Service</Link>
-          <span className="text-zinc-200">•</span>
+          <span className="text-zinc-200 select-none">•</span>
           <Link href="/contact" className="hover:text-zinc-700 transition-colors">Contact Support</Link>
         </div>
-        <div className="mt-4 text-[9px] tracking-wider text-zinc-400 uppercase font-light space-y-1.5">
+        <div className="mt-2.5 text-[9px] tracking-wider text-zinc-400 uppercase font-light space-y-1">
           <p>ENTERURL @2026</p>
-          <p className="normal-case text-[10px] text-zinc-400 font-light">
+          <p className="normal-case text-[10px] text-zinc-450 font-light">
             Created with ♥ by{' '}
             <a 
               href="https://shashankqoder.vercel.app" 
               target="_blank" 
               rel="noopener noreferrer" 
-              className="font-bold text-zinc-500 hover:text-violet-600 transition-colors select-text hover:underline"
+              className="font-bold text-zinc-550 hover:text-violet-600 transition-colors select-text hover:underline"
             >
               Shashank Gupta
             </a>
