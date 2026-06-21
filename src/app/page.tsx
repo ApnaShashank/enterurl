@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useUser, useClerk, SignInButton, SignUpButton } from '@clerk/nextjs';
+import Link from 'next/link';
 import { 
   Link as LinkIcon, 
   Image as ImageIcon, 
@@ -5028,9 +5029,31 @@ export default function Home() {
         )}
       </main>
 
-      {/* Footer copyright */}
-      <footer className="mt-16 mb-8 text-center select-none text-[10px] tracking-widest text-zinc-450 font-light relative w-full">
-        DESIGN RESOURCE &copy; {new Date().getFullYear()}
+      {/* Premium SEO directory footer */}
+      <footer className="mt-20 mb-8 w-full max-w-xl mx-auto border-t border-zinc-200/60 pt-6 px-4 text-center select-none">
+        <div className="flex flex-wrap justify-center items-center gap-x-6 gap-y-2.5 text-[11px] font-medium text-zinc-400">
+          <Link href="/about" className="hover:text-zinc-700 transition-colors">About Us</Link>
+          <span className="text-zinc-200">•</span>
+          <Link href="/privacy" className="hover:text-zinc-700 transition-colors">Privacy Policy</Link>
+          <span className="text-zinc-200">•</span>
+          <Link href="/terms" className="hover:text-zinc-700 transition-colors">Terms of Service</Link>
+          <span className="text-zinc-200">•</span>
+          <Link href="/contact" className="hover:text-zinc-700 transition-colors">Contact Support</Link>
+        </div>
+        <div className="mt-4 text-[9px] tracking-wider text-zinc-400 uppercase font-light space-y-1.5">
+          <p>ENTERURL @2026</p>
+          <p className="normal-case text-[10px] text-zinc-400 font-light">
+            Created with ♥ by{' '}
+            <a 
+              href="https://shashankqoder.vercel.app" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="font-bold text-zinc-500 hover:text-violet-600 transition-colors select-text hover:underline"
+            >
+              Shashank Gupta
+            </a>
+          </p>
+        </div>
       </footer>
 
       {/* SVG Liquid Distortion Filter */}
@@ -5044,47 +5067,46 @@ export default function Home() {
       </svg>
       {/* AUTH OVERLAY MODAL */}
       {isAuthModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-zinc-900/90 border border-zinc-850/80 rounded-2xl p-8 shadow-2xl relative z-10 animate-scale-up-in select-text">
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white/90 border border-zinc-200/80 rounded-3xl p-8 shadow-2xl relative z-10 animate-scale-up-in select-text backdrop-blur-2xl">
             {/* Close Button */}
             <button 
               onClick={() => {
                 setIsAuthModalOpen(false);
-                setAuthError(null);
               }}
-              className="absolute top-4 right-4 text-zinc-450 hover:text-white text-xs cursor-pointer font-semibold p-1 hover:bg-zinc-800 rounded-lg transition-colors border-0 bg-transparent"
+              className="absolute top-4.5 right-4.5 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 p-2 rounded-xl transition-all border-0 bg-transparent cursor-pointer flex items-center justify-center font-bold text-xs"
             >
               ✕
             </button>
 
             <div className="text-center mb-6 select-none">
-              <h2 className="text-xl font-bold text-white tracking-tight">
+              <h2 className="text-xl font-black text-zinc-900 tracking-tight leading-none mb-2">
                 {authModalRequiredLevel === 'pro' && currentUser
-                  ? "PRO Feature Blocked"
+                  ? "Upgrade Required"
                   : authModalMode === 'signup' 
-                    ? "Register for unlock more features" 
-                    : "Welcome back"}
+                    ? "Unlock Deep Analysis" 
+                    : "Welcome Back"}
               </h2>
-              <p className="text-xs text-zinc-400 mt-1.5">
+              <p className="text-xs text-zinc-500 font-light leading-relaxed max-w-xs mx-auto">
                 {authModalRequiredLevel === 'pro' && currentUser
-                  ? "Standard accounts cannot access this high-cost resource."
+                  ? "Standard accounts cannot access this premium resource."
                   : authModalMode === 'signup'
-                    ? "Create an account to run deep scans, AI summaries, and unlimited previews."
-                    : "Enter your credentials to access your saved workspace."}
+                    ? "Register to run deep code scans, AI research summaries, and download media files."
+                    : "Log in with Google to resume your active intelligence dashboard."}
               </p>
             </div>
 
             {/* If they are standard user logged in, but try to use pro features, show Upgrade callout */}
             {authModalRequiredLevel === 'pro' && currentUser && currentUser.role !== 'pro' ? (
               <div className="space-y-4">
-                <div className="p-4 bg-violet-950/20 border border-violet-900/40 text-violet-300 rounded-xl text-xs space-y-1.5 leading-relaxed">
-                  <span className="font-semibold block text-white">Upgrade to Premium Tier Required</span>
-                  <span>To unlock Pro features (like AI background removal and creative writing tools), please request the administrator to upgrade your account to <strong className="text-violet-400">pro</strong> role.</span>
-                  <span className="block mt-2 font-mono text-[10px] text-zinc-500">Admin contact: shashank8808108802@gmail.com</span>
+                <div className="p-4 bg-violet-50 border border-violet-100 text-violet-750 rounded-2xl text-xs space-y-1.5 leading-relaxed font-light">
+                  <span className="font-semibold block text-zinc-900">Upgrade to Pro Required</span>
+                  <span>To unlock Pro features (like AI background removal and creative writing tools), please request the administrator to upgrade your account to <strong className="text-violet-650 font-bold">pro</strong> role.</span>
+                  <span className="block mt-2 font-mono text-[10px] text-zinc-400">Admin contact: shashank8808108802@gmail.com</span>
                 </div>
                 <button
                   onClick={() => setIsAuthModalOpen(false)}
-                  className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-semibold cursor-pointer border border-zinc-700/50"
+                  className="w-full py-3 bg-zinc-900 hover:bg-zinc-850 text-white font-semibold rounded-xl text-xs transition-all shadow-md cursor-pointer border-0"
                 >
                   Close Prompt
                 </button>
@@ -5093,7 +5115,7 @@ export default function Home() {
               <div className="space-y-4">
                 <SignInButton mode="modal">
                   <button
-                    className="w-full py-3.5 bg-violet-650 hover:bg-violet-750 text-white font-semibold rounded-xl text-xs transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 border-0"
+                    className="w-full py-3.5 bg-violet-600 hover:bg-violet-750 text-white font-semibold rounded-xl text-xs transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 border-0"
                   >
                     <span>{authModalMode === 'signup' ? 'Sign Up with Google' : 'Sign In with Google'}</span>
                   </button>
@@ -5105,7 +5127,7 @@ export default function Home() {
                     onClick={() => {
                       setAuthModalMode(authModalMode === 'signup' ? 'login' : 'signup');
                     }}
-                    className="text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer border-0 bg-transparent"
+                    className="text-xs text-zinc-400 hover:text-zinc-650 transition-colors cursor-pointer border-0 bg-transparent font-medium"
                   >
                     {authModalMode === 'signup' 
                       ? "Already have an account? Sign In" 

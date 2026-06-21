@@ -849,7 +849,7 @@ export default function AdminPanel() {
 
       {/* Footer */}
       <footer className="border-t border-zinc-200/80 py-6 text-center text-[10px] text-zinc-500 bg-white/40 select-none">
-        Design Resource & System Analytics © 2026 EnterURL Portal
+        ENTERURL @2026
       </footer>
 
     </div>
