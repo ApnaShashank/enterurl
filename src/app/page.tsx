@@ -580,7 +580,17 @@ export default function Home() {
           })
           .catch(err => console.error('Failed to fetch session on Clerk change:', err));
       } else {
-        setCurrentUser(null);
+        // Fallback: check custom session
+        fetch('/api/auth/me')
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && data.user) {
+              setCurrentUser(data.user);
+            } else {
+              setCurrentUser(null);
+            }
+          })
+          .catch(() => setCurrentUser(null));
       }
     }
   }, [clerkUser, clerkLoaded]);
@@ -592,6 +602,7 @@ export default function Home() {
   const handleLogout = async () => {
     try {
       await signOut();
+      await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
       setCurrentUser(null);
     } catch (err) {
       console.error('Logout error:', err);

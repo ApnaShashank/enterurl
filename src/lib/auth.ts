@@ -45,34 +45,54 @@ export async function getCurrentUser() {
     const crypto = await import('crypto');
 
     const clerkUser = await currentUser();
-    if (!clerkUser) return null;
+    if (clerkUser) {
+      const email = clerkUser.emailAddresses[0]?.emailAddress?.toLowerCase();
+      if (email) {
+        await connectToDatabase();
+        let user = await User.findOne({ email });
+        if (!user) {
+          // Lazy sync: create new standard user in our local database
+          const randomSalt = crypto.randomBytes(16).toString('hex');
+          const randomHash = crypto.randomBytes(32).toString('hex');
+          
+          const adminEmail = (process.env.ADMIN_EMAIL || 'shashank8808108802@gmail.com').toLowerCase();
+          const role = (email === adminEmail) ? 'admin' : 'standard';
 
-    const email = clerkUser.emailAddresses[0]?.emailAddress?.toLowerCase();
-    if (!email) return null;
+          user = await User.create({
+            email,
+            passwordHash: `clerk_oauth_${randomHash}`,
+            salt: randomSalt,
+            role: role,
+            createdAt: new Date()
+          });
+        }
 
-    await connectToDatabase();
-    let user = await User.findOne({ email });
-    if (!user) {
-      // Lazy sync: create new standard user in our local database
-      const randomSalt = crypto.randomBytes(16).toString('hex');
-      const randomHash = crypto.randomBytes(32).toString('hex');
-      
-      const adminEmail = (process.env.ADMIN_EMAIL || 'shashank8808108802@gmail.com').toLowerCase();
-      const role = (email === adminEmail) ? 'admin' : 'standard';
-
-      user = await User.create({
-        email,
-        passwordHash: `clerk_oauth_${randomHash}`,
-        salt: randomSalt,
-        role: role,
-        createdAt: new Date()
-      });
+        return {
+          email: user.email,
+          role: user.role as 'standard' | 'pro' | 'admin'
+        };
+      }
     }
 
-    return {
-      email: user.email,
-      role: user.role as 'standard' | 'pro' | 'admin'
-    };
+    // Fallback: check custom credentials cookie auth_token
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const token = cookieStore.get('auth_token')?.value;
+    if (token) {
+      const decoded = verifyToken(token);
+      if (decoded) {
+        await connectToDatabase();
+        const user = await User.findOne({ email: decoded.email.toLowerCase() });
+        if (user) {
+          return {
+            email: user.email,
+            role: user.role as 'standard' | 'pro' | 'admin'
+          };
+        }
+      }
+    }
+
+    return null;
   } catch (err) {
     console.error('getCurrentUser error:', err);
     return null;
