@@ -840,7 +840,59 @@ export default function Home() {
   const [isAutoCaptioning, setIsAutoCaptioning] = useState(false);
   const [autoCaptionError, setAutoCaptionError] = useState<string | null>(null);
   const [autoCaptionStep, setAutoCaptionStep] = useState(0); // 0=idle, 1=extracting audio, 2=transcribing, 3=syncing
+  const [videoLoadProgress, setVideoLoadProgress] = useState<number | null>(null);
+  const [editorCaptionFontSize, setEditorCaptionFontSize] = useState<number>(24);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const requestRef = useRef<number | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+
+  // Smooth precise 60fps subtitle tick loop using requestAnimationFrame
+  useEffect(() => {
+    const tick = () => {
+      if (videoRef.current) {
+        setEditorCurrentTime(videoRef.current.currentTime);
+      }
+      requestRef.current = requestAnimationFrame(tick);
+    };
+
+    const handlePlay = () => {
+      requestRef.current = requestAnimationFrame(tick);
+    };
+    
+    const handlePause = () => {
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = null;
+      }
+      if (videoRef.current) {
+        setEditorCurrentTime(videoRef.current.currentTime);
+      }
+    };
+
+    const handleSeeked = () => {
+      if (videoRef.current) {
+        setEditorCurrentTime(videoRef.current.currentTime);
+      }
+    };
+
+    const videoEl = videoRef.current;
+    if (videoEl) {
+      videoEl.addEventListener('play', handlePlay);
+      videoEl.addEventListener('pause', handlePause);
+      videoEl.addEventListener('seeked', handleSeeked);
+    }
+
+    return () => {
+      if (videoEl) {
+        videoEl.removeEventListener('play', handlePlay);
+        videoEl.removeEventListener('pause', handlePause);
+        videoEl.removeEventListener('seeked', handleSeeked);
+      }
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+      }
+    };
+  }, [editorVideoUrl]);
 
   // States for creating/adding new overlays
   const [newOverlayText, setNewOverlayText] = useState('');
@@ -937,8 +989,6 @@ export default function Home() {
     if (isDirectVid || result.platform === 'direct-video') {
       console.log('[handleLaunchCaptionEditor] Using direct video URL:', result.url);
       resolvedVideo = result.url;
-      setEditorVideoUrl(result.url);
-      setIsResolvingVideo(false);
     } else {
       try {
         console.log('[handleLaunchCaptionEditor] Resolving video URL via /api/download-media...');
@@ -952,19 +1002,58 @@ export default function Home() {
         console.log('[handleLaunchCaptionEditor] /api/download-media response:', data);
         if (data.success && data.downloadUrl) {
           resolvedVideo = data.downloadUrl;
-          setEditorVideoUrl(data.downloadUrl);
         } else {
           console.warn('[handleLaunchCaptionEditor] /api/download-media failed or returned no URL, using fallback.');
           resolvedVideo = result.url;
-          setEditorVideoUrl(result.url);
         }
       } catch (err) {
         console.error('[handleLaunchCaptionEditor] Failed to resolve Cobalt video:', err);
         resolvedVideo = result.url;
-        setEditorVideoUrl(result.url);
+      }
+    }
+
+    // Fully download resolved video to client to show a percentage loader
+    if (resolvedVideo) {
+      try {
+        setVideoLoadProgress(0);
+        setIsResolvingVideo(false); // Turn off skeleton, use progress loader
+        const response = await fetch(resolvedVideo);
+        if (!response.ok) throw new Error('Video download request failed');
+        
+        const reader = response.body?.getReader();
+        const contentLength = +(response.headers.get('Content-Length') || 0);
+        
+        if (!reader || contentLength === 0) {
+          // Fallback if reader or Content-Length not available
+          setEditorVideoUrl(resolvedVideo);
+        } else {
+          let receivedLength = 0;
+          const chunks = [];
+          
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) {
+              chunks.push(value);
+              receivedLength += value.length;
+              const percent = Math.round((receivedLength / contentLength) * 100);
+              setVideoLoadProgress(percent);
+            }
+          }
+          
+          const blob = new Blob(chunks, { type: 'video/mp4' });
+          const blobUrl = URL.createObjectURL(blob);
+          setEditorVideoUrl(blobUrl);
+        }
+      } catch (dlErr) {
+        console.error('Failed to download video stream, using fallback direct streaming:', dlErr);
+        setEditorVideoUrl(resolvedVideo);
       } finally {
+        setVideoLoadProgress(null);
         setIsResolvingVideo(false);
       }
+    } else {
+      setIsResolvingVideo(false);
     }
 
     // Auth gate check
@@ -5205,29 +5294,57 @@ export default function Home() {
             </div>
 
             {/* Editor Workspace */}
-            {isResolvingVideo ? (
-              /* SKELETON LOADING for video resolving */
+            {isResolvingVideo || videoLoadProgress !== null ? (
+              /* Loader Screen */
               <div className="p-6 flex flex-col lg:flex-row gap-6 select-none bg-zinc-50/50">
-                {/* Left: video skeleton with loading details */}
+                {/* Left: progress load details */}
                 <div className="lg:w-3/5 flex flex-col gap-4">
-                  <div className="w-full aspect-video bg-white border border-zinc-200/80 rounded-2xl flex flex-col items-center justify-center p-6 text-center shadow-xs relative overflow-hidden">
-                    <div className="absolute inset-0 bg-linear-to-r from-transparent via-zinc-100/30 to-transparent animate-pulse"></div>
-                    <div className="relative z-10 space-y-4">
-                      <div className="h-12 w-12 rounded-full bg-violet-50 flex items-center justify-center text-violet-600 animate-bounce mx-auto">
-                        <Sparkles size={20} className="animate-pulse" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <h3 className="text-sm font-bold text-zinc-900">Preparing Studio Preview</h3>
-                        <p className="text-xs text-zinc-400 max-w-[280px] leading-relaxed mx-auto">
-                          Downloading video source and fetching auto-generated subtitle segments...
-                        </p>
-                      </div>
-                      <div className="flex items-center justify-center gap-1.5 px-3 py-1 bg-zinc-100 rounded-full w-fit mx-auto text-[10px] text-zinc-500 font-semibold border border-zinc-200/40">
-                        <LoaderPulsingDots size={8} className="text-zinc-400" />
-                        <span>Resolving Media Stream</span>
+                  {videoLoadProgress !== null ? (
+                    <div className="w-full aspect-video bg-white border border-zinc-200/80 rounded-2xl flex flex-col items-center justify-center p-6 text-center shadow-xs relative overflow-hidden">
+                      <div className="absolute inset-0 bg-linear-to-r from-transparent via-zinc-100/30 to-transparent animate-pulse"></div>
+                      <div className="relative z-10 space-y-4">
+                        <div className="h-12 w-12 rounded-full bg-violet-50 flex items-center justify-center text-violet-600 animate-bounce mx-auto">
+                          <Download size={20} className="animate-pulse" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <h3 className="text-sm font-bold text-zinc-900">Downloading Studio Asset</h3>
+                          <p className="text-xs text-zinc-400 max-w-[280px] leading-relaxed mx-auto">
+                            Downloading media stream chunks into local sandbox...
+                          </p>
+                        </div>
+                        {/* Progress Bar */}
+                        <div className="w-48 h-2.5 bg-zinc-100 rounded-full overflow-hidden mx-auto border border-zinc-200/40">
+                          <div 
+                            className="h-full bg-violet-600 rounded-full transition-all duration-155"
+                            style={{ width: `${videoLoadProgress}%` }}
+                          />
+                        </div>
+                        <div className="text-xs font-black text-violet-600 tracking-wider">
+                          {videoLoadProgress}% COMPLETED
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    /* SKELETON LOADING for video resolving */
+                    <div className="w-full aspect-video bg-white border border-zinc-200/80 rounded-2xl flex flex-col items-center justify-center p-6 text-center shadow-xs relative overflow-hidden">
+                      <div className="absolute inset-0 bg-linear-to-r from-transparent via-zinc-100/30 to-transparent animate-pulse"></div>
+                      <div className="relative z-10 space-y-4">
+                        <div className="h-12 w-12 rounded-full bg-violet-50 flex items-center justify-center text-violet-600 animate-bounce mx-auto">
+                          <Sparkles size={20} className="animate-pulse" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <h3 className="text-sm font-bold text-zinc-900">Preparing Studio Preview</h3>
+                          <p className="text-xs text-zinc-400 max-w-[280px] leading-relaxed mx-auto">
+                            Downloading video source and fetching auto-generated subtitle segments...
+                          </p>
+                        </div>
+                        <div className="flex items-center justify-center gap-1.5 px-3 py-1 bg-zinc-100 rounded-full w-fit mx-auto text-[10px] text-zinc-500 font-semibold border border-zinc-200/40">
+                          <LoaderPulsingDots size={8} className="text-zinc-400" />
+                          <span>Resolving Media Stream</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   <div className="h-12 bg-white border border-zinc-200 rounded-xl w-full animate-pulse"></div>
                 </div>
                 {/* Right: sidebar skeleton */}
@@ -5250,14 +5367,14 @@ export default function Home() {
                   >
                     {editorVideoUrl ? (
                       <video
+                        ref={videoRef}
                         src={editorVideoUrl}
                         controls
-                        className="w-full h-full object-contain"
+                        className="w-full h-full object-contain animate-fade-in"
                         onLoadedMetadata={(e) => {
                           const video = e.currentTarget;
                           setVideoAspectRatio(video.videoHeight > video.videoWidth ? 'portrait' : 'landscape');
                         }}
-                        onTimeUpdate={(e) => setEditorCurrentTime(e.currentTarget.currentTime)}
                       />
                     ) : (
                       <div className="flex flex-col items-center justify-center gap-2 py-10 text-zinc-400 select-none">
@@ -5266,7 +5383,7 @@ export default function Home() {
                       </div>
                     )}
 
-                    {/* SYNCED CAPTION OVERLAY */}
+                    {/* SYNCED CAPTION OVERLAY WITH DRAG-TO-RESIZE AND TYPE-TO-EDIT */}
                     {(() => {
                       const activeSub = editorSubtitles.find(
                         s => editorCurrentTime >= s.start && editorCurrentTime <= s.end
@@ -5275,18 +5392,82 @@ export default function Home() {
                       const preset = CAPTION_PRESETS.find(p => p.id === editorStylePreset) || CAPTION_PRESETS[0];
                       const activeColor = editorCaptionColor || preset.defaultColor;
                       const activeFontFamily = editorCaptionFont || preset.fontFamily;
+                      
                       return (
-                        <div className="absolute bottom-8 left-4 right-4 flex justify-center text-center pointer-events-none z-10">
-                          <span
-                            style={{
-                              ...preset.style as React.CSSProperties,
-                              color: activeColor,
-                              fontFamily: activeFontFamily,
-                            }}
-                            className="px-3 py-1.5 text-center select-none shadow-lg max-w-full leading-snug"
+                        <div className="absolute bottom-8 left-4 right-4 flex justify-center text-center z-20">
+                          <div 
+                            className="relative border border-dashed border-zinc-400/50 hover:border-violet-500/80 p-2 rounded-xl group transition-all select-none max-w-full"
+                            style={{ cursor: 'ew-resize' }}
                           >
-                            {activeSub.text}
-                          </span>
+                            {/* Editable input for subtitle text */}
+                            <input
+                              type="text"
+                              value={activeSub.text}
+                              onChange={(e) => {
+                                const newText = e.target.value;
+                                setEditorSubtitles(prev => prev.map(s => s.index === activeSub.index ? { ...s, text: newText } : s));
+                              }}
+                              style={{
+                                ...preset.style as React.CSSProperties,
+                                fontSize: `${editorCaptionFontSize}px`,
+                                color: activeColor,
+                                fontFamily: activeFontFamily,
+                                background: 'transparent',
+                                border: 'none',
+                                outline: 'none',
+                                textAlign: 'center',
+                                width: `${Math.max(120, activeSub.text.length * (editorCaptionFontSize * 0.55))}px`,
+                                maxWidth: '100%'
+                              }}
+                              className="focus:border-0 focus:ring-0 leading-snug px-2 cursor-text"
+                            />
+
+                            {/* Resize handle in bottom right corner */}
+                            <div 
+                              className="absolute bottom-0 right-0 h-4.5 w-4.5 bg-violet-600 rounded-full border-2 border-white flex items-center justify-center cursor-se-resize shadow-md -mb-1 -mr-1"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const startX = e.clientX;
+                                const startSize = editorCaptionFontSize;
+                                
+                                const handleMouseMove = (moveEvent: MouseEvent) => {
+                                  const deltaX = moveEvent.clientX - startX;
+                                  const newSize = Math.max(12, Math.min(64, startSize + deltaX * 0.15));
+                                  setEditorCaptionFontSize(newSize);
+                                };
+
+                                const handleMouseUp = () => {
+                                  document.removeEventListener('mousemove', handleMouseMove);
+                                  document.removeEventListener('mouseup', handleMouseUp);
+                                };
+
+                                document.addEventListener('mousemove', handleMouseMove);
+                                document.addEventListener('mouseup', handleMouseUp);
+                              }}
+                              onTouchStart={(e) => {
+                                e.stopPropagation();
+                                const startX = e.touches[0].clientX;
+                                const startSize = editorCaptionFontSize;
+
+                                const handleTouchMove = (moveEvent: TouchEvent) => {
+                                  const deltaX = moveEvent.touches[0].clientX - startX;
+                                  const newSize = Math.max(12, Math.min(64, startSize + deltaX * 0.15));
+                                  setEditorCaptionFontSize(newSize);
+                                };
+
+                                const handleTouchEnd = () => {
+                                  document.removeEventListener('touchmove', handleTouchMove);
+                                  document.removeEventListener('touchend', handleTouchEnd);
+                                };
+
+                                document.addEventListener('touchmove', handleTouchMove, { passive: true });
+                                document.addEventListener('touchend', handleTouchEnd);
+                              }}
+                            >
+                              <span className="text-[8px] text-white font-bold select-none">✥</span>
+                            </div>
+                          </div>
                         </div>
                       );
                     })()}
