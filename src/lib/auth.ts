@@ -74,65 +74,117 @@ export async function getCurrentUser() {
   }
 }
 
-export async function checkFeaturePermission(featureName: string): Promise<{
+export async function checkFeaturePermission(featureName: string, userIp?: string): Promise<{
   authorized: boolean;
   requiredLevel: 'free' | 'registered' | 'pro';
   user: { email: string; role: 'standard' | 'pro' | 'admin' } | null;
+  limitReached: boolean;
+  currentCount: number;
+  maxLimit: number;
 }> {
-  const defaultTiers: Record<string, 'free' | 'registered' | 'pro'> = {
-    'analyze-intel': 'registered',
-    'analyze-lighthouse': 'free',
-    'analyze-ai-research': 'registered',
-    'analyze-ai-writer': 'pro',
-    'download-media': 'free',
-    'transcribe': 'registered',
-    'remove-bg': 'pro',
-    'screenshot': 'registered'
+  const defaultConfigs: Record<string, { requiredLevel: 'free' | 'registered' | 'pro'; freeLimit: number; registeredLimit: number; proLimit: number }> = {
+    'analyze-base': { requiredLevel: 'free', freeLimit: 10, registeredLimit: 50, proLimit: -1 },
+    'analyze-intel': { requiredLevel: 'registered', freeLimit: 0, registeredLimit: 30, proLimit: -1 },
+    'analyze-lighthouse': { requiredLevel: 'free', freeLimit: 10, registeredLimit: 40, proLimit: -1 },
+    'analyze-ai-research': { requiredLevel: 'registered', freeLimit: 0, registeredLimit: 10, proLimit: -1 },
+    'analyze-ai-writer': { requiredLevel: 'pro', freeLimit: 0, registeredLimit: 0, proLimit: 50 },
+    'download-media': { requiredLevel: 'free', freeLimit: 5, registeredLimit: 25, proLimit: -1 },
+    'transcribe': { requiredLevel: 'registered', freeLimit: 0, registeredLimit: 5, proLimit: 50 },
+    'remove-bg': { requiredLevel: 'pro', freeLimit: 0, registeredLimit: 0, proLimit: 20 },
+    'screenshot': { requiredLevel: 'registered', freeLimit: 0, registeredLimit: 15, proLimit: -1 }
   };
 
-  const defaultLevel = defaultTiers[featureName] || 'registered';
-  let requiredLevel = defaultLevel;
+  const def = defaultConfigs[featureName] || { requiredLevel: 'registered' as const, freeLimit: 0, registeredLimit: 10, proLimit: -1 };
+  let requiredLevel = def.requiredLevel;
+  let freeLimit = def.freeLimit;
+  let registeredLimit = def.registeredLimit;
+  let proLimit = def.proLimit;
+
   let user: { email: string; role: 'standard' | 'pro' | 'admin' } | null = null;
+  let limitReached = false;
+  let currentCount = 0;
+  let maxLimit = 0;
 
   try {
     const { connectToDatabase } = await import('@/lib/db');
     const ApiConfig = (await import('@/models/ApiConfig')).default;
+    const ApiUsageLog = (await import('@/models/ApiUsageLog')).default;
 
     try {
       await connectToDatabase();
       const config = await ApiConfig.findOne({ featureName });
       if (config) {
         requiredLevel = config.requiredLevel;
+        if (config.freeLimit !== undefined) freeLimit = config.freeLimit;
+        if (config.registeredLimit !== undefined) registeredLimit = config.registeredLimit;
+        if (config.proLimit !== undefined) proLimit = config.proLimit;
       }
     } catch (dbErr: any) {
       console.warn(`checkFeaturePermission DB connection failed for ${featureName}, using default level:`, dbErr.message);
     }
 
-    if (requiredLevel === 'free') {
-      user = await getCurrentUser();
-      return { authorized: true, requiredLevel, user };
-    }
-
     user = await getCurrentUser();
-    if (!user) {
-      return { authorized: false, requiredLevel, user: null };
-    }
 
-    if (requiredLevel === 'registered') {
-      return { authorized: true, requiredLevel, user };
-    }
-
-    if (requiredLevel === 'pro') {
-      if (user.role === 'pro' || user.role === 'admin') {
-        return { authorized: true, requiredLevel, user };
+    // Determine maxLimit based on user's tier
+    if (user) {
+      if (user.role === 'admin') {
+        maxLimit = -1; // Unlimited for admin
+      } else if (user.role === 'pro') {
+        maxLimit = proLimit;
+      } else {
+        maxLimit = registeredLimit;
       }
-      return { authorized: false, requiredLevel, user };
+    } else {
+      maxLimit = freeLimit;
     }
 
-    return { authorized: false, requiredLevel, user };
+    // Step 1: Check standard role tier authorizations
+    let tierAuthorized = false;
+    if (requiredLevel === 'free') {
+      tierAuthorized = true;
+    } else if (requiredLevel === 'registered') {
+      tierAuthorized = user !== null;
+    } else if (requiredLevel === 'pro') {
+      tierAuthorized = user !== null && (user.role === 'pro' || user.role === 'admin');
+    }
+
+    if (!tierAuthorized) {
+      return { authorized: false, requiredLevel, user, limitReached: false, currentCount: 0, maxLimit };
+    }
+
+    // Step 2: Check rate limits
+    if (maxLimit !== -1) {
+      const startOf24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      try {
+        const query: any = {
+          action: featureName,
+          status: 'success', // Only count successful executions
+          timestamp: { $gte: startOf24h }
+        };
+
+        if (user) {
+          query.userEmail = user.email;
+        } else if (userIp) {
+          query.ip = userIp;
+        } else {
+          // If no IP or user is present, don't query count
+          query.ip = 'unknown-ip-skip';
+        }
+
+        currentCount = await ApiUsageLog.countDocuments(query);
+        if (currentCount >= maxLimit) {
+          limitReached = true;
+          return { authorized: false, requiredLevel, user, limitReached, currentCount, maxLimit };
+        }
+      } catch (countErr) {
+        console.error('Failed to count document usage for limit:', countErr);
+      }
+    }
+
+    return { authorized: true, requiredLevel, user, limitReached, currentCount, maxLimit };
   } catch (err) {
     console.error('checkFeaturePermission error:', err);
-    return { authorized: requiredLevel === 'free', requiredLevel, user: null };
+    return { authorized: requiredLevel === 'free', requiredLevel, user: null, limitReached: false, currentCount: 0, maxLimit };
   }
 }
 

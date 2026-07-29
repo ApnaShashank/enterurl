@@ -5,14 +5,15 @@ import { connectToDatabase } from '@/lib/db';
 import ApiConfig from '@/models/ApiConfig';
 
 const DEFAULT_CONFIGS = [
-  { featureName: 'analyze-intel', requiredLevel: 'registered' },
-  { featureName: 'analyze-lighthouse', requiredLevel: 'free' },
-  { featureName: 'analyze-ai-research', requiredLevel: 'registered' },
-  { featureName: 'analyze-ai-writer', requiredLevel: 'pro' },
-  { featureName: 'download-media', requiredLevel: 'free' },
-  { featureName: 'transcribe', requiredLevel: 'registered' },
-  { featureName: 'remove-bg', requiredLevel: 'pro' },
-  { featureName: 'screenshot', requiredLevel: 'registered' }
+  { featureName: 'analyze-base', requiredLevel: 'free', freeLimit: 10, registeredLimit: 50, proLimit: -1 },
+  { featureName: 'analyze-intel', requiredLevel: 'registered', freeLimit: 0, registeredLimit: 30, proLimit: -1 },
+  { featureName: 'analyze-lighthouse', requiredLevel: 'free', freeLimit: 10, registeredLimit: 40, proLimit: -1 },
+  { featureName: 'analyze-ai-research', requiredLevel: 'registered', freeLimit: 0, registeredLimit: 10, proLimit: -1 },
+  { featureName: 'analyze-ai-writer', requiredLevel: 'pro', freeLimit: 0, registeredLimit: 0, proLimit: 50 },
+  { featureName: 'download-media', requiredLevel: 'free', freeLimit: 5, registeredLimit: 25, proLimit: -1 },
+  { featureName: 'transcribe', requiredLevel: 'registered', freeLimit: 0, registeredLimit: 5, proLimit: 50 },
+  { featureName: 'remove-bg', requiredLevel: 'pro', freeLimit: 0, registeredLimit: 0, proLimit: 20 },
+  { featureName: 'screenshot', requiredLevel: 'registered', freeLimit: 0, registeredLimit: 15, proLimit: -1 }
 ];
 
 async function verifyAdmin() {
@@ -36,7 +37,10 @@ export async function GET(request: NextRequest) {
       const dbMatch = dbConfigs.find(c => c.featureName === def.featureName);
       return {
         featureName: def.featureName,
-        requiredLevel: dbMatch ? dbMatch.requiredLevel : def.requiredLevel
+        requiredLevel: dbMatch ? dbMatch.requiredLevel : def.requiredLevel,
+        freeLimit: dbMatch && dbMatch.freeLimit !== undefined ? dbMatch.freeLimit : def.freeLimit,
+        registeredLimit: dbMatch && dbMatch.registeredLimit !== undefined ? dbMatch.registeredLimit : def.registeredLimit,
+        proLimit: dbMatch && dbMatch.proLimit !== undefined ? dbMatch.proLimit : def.proLimit
       };
     });
 
@@ -53,7 +57,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { featureName, requiredLevel } = await request.json();
+    const { featureName, requiredLevel, freeLimit, registeredLimit, proLimit } = await request.json();
     if (!featureName || !requiredLevel) {
       return NextResponse.json({ success: false, error: 'Feature name and required level are required' }, { status: 400 });
     }
@@ -65,16 +69,18 @@ export async function POST(request: NextRequest) {
     await connectToDatabase();
     const updatedConfig = await ApiConfig.findOneAndUpdate(
       { featureName },
-      { requiredLevel },
+      { 
+        requiredLevel,
+        freeLimit: freeLimit !== undefined ? parseInt(freeLimit, 10) : undefined,
+        registeredLimit: registeredLimit !== undefined ? parseInt(registeredLimit, 10) : undefined,
+        proLimit: proLimit !== undefined ? parseInt(proLimit, 10) : undefined
+      },
       { new: true, upsert: true }
     );
 
     return NextResponse.json({
       success: true,
-      config: {
-        featureName: updatedConfig.featureName,
-        requiredLevel: updatedConfig.requiredLevel
-      }
+      config: updatedConfig
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });

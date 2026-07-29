@@ -982,6 +982,14 @@ export async function POST(request: NextRequest) {
     console.error('Failed to parse request body:', err);
   }
 
+  // Get IP
+  try {
+    const headerIp = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip');
+    if (headerIp) {
+      ip = headerIp.includes(',') ? headerIp.split(',')[0].trim() : headerIp.trim();
+    }
+  } catch {}
+
   let currentUserEmail: string | undefined = undefined;
   try {
     const { getCurrentUser } = await import('@/lib/auth');
@@ -993,25 +1001,31 @@ export async function POST(request: NextRequest) {
     console.error('getCurrentUser failed in analyze route:', err);
   }
 
-  // Auth gate check for paid/heavy scans
-  if (['intel', 'lighthouse', 'ai-research', 'ai-writer', 'trust-safety'].includes(scanType)) {
-    const featureName = scanType === 'trust-safety' ? 'analyze-intel' : `analyze-${scanType}`;
-    try {
-      const { checkFeaturePermission } = await import('@/lib/auth');
-      const permission = await checkFeaturePermission(featureName);
-      if (!permission.authorized) {
-        return NextResponse.json({
-          success: false,
-          error: 'Access Restricted',
-          requiredLevel: permission.requiredLevel
-        }, { status: 403 });
-      }
-      if (permission.user) {
-        currentUserEmail = permission.user.email;
-      }
-    } catch (authGateErr) {
-      console.error('Auth gate check failed:', authGateErr);
+  // Auth & Rate Limit check
+  const featureName = (scanType === 'trust-safety' || scanType === 'intel')
+    ? 'analyze-intel'
+    : ['lighthouse', 'ai-research', 'ai-writer'].includes(scanType)
+      ? `analyze-${scanType}`
+      : 'analyze-base';
+
+  try {
+    const { checkFeaturePermission } = await import('@/lib/auth');
+    const permission = await checkFeaturePermission(featureName, ip);
+    if (!permission.authorized) {
+      return NextResponse.json({
+        success: false,
+        error: permission.limitReached 
+          ? `Daily limit of ${permission.maxLimit} scans reached. Please upgrade to unlock more!` 
+          : 'Access Restricted',
+        requiredLevel: permission.requiredLevel,
+        limitReached: permission.limitReached
+      }, { status: permission.limitReached ? 429 : 403 });
     }
+    if (permission.user) {
+      currentUserEmail = permission.user.email;
+    }
+  } catch (authGateErr) {
+    console.error('Auth gate check failed:', authGateErr);
   }
 
   // Connect to database
@@ -1021,12 +1035,7 @@ export async function POST(request: NextRequest) {
     console.error('Database connection failed:', dbErr);
   }
 
-  try {
-    const headerIp = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip');
-    if (headerIp) {
-      ip = headerIp.includes(',') ? headerIp.split(',')[0].trim() : headerIp.trim();
-    }
-  } catch {}
+  // IP extraction already completed above
 
   const sendResponse = async (data: any, status: number = 200) => {
     try {
@@ -1066,29 +1075,7 @@ export async function POST(request: NextRequest) {
       return await sendResponse({ success: false, error: 'URL is required' }, 400);
     }
 
-    // Enforce 10 links per 24 hours rate limit for anonymous scans
-    if ((scanType === 'base' || !scanType) && !currentUserEmail) {
-      const startOf24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      try {
-        if (mongoose.connection.readyState === 1) {
-          const count = await ApiUsageLog.countDocuments({
-            ip,
-            action: 'analyze-base',
-            timestamp: { $gte: startOf24h }
-          });
-          if (count >= 10) {
-            return await sendResponse({
-              success: false,
-              error: 'Daily limit of 10 link detections reached. Please register/log in to unlock unlimited scans.'
-            }, 429);
-          }
-        } else {
-          console.warn('MongoDB not connected, skipping rate limit check.');
-        }
-      } catch (limitErr) {
-        console.error('Rate limit query failed:', limitErr);
-      }
-    }
+    // Enforced via checkFeaturePermission check at start of route
 
     const url = cleanUrl(rawUrl);
     const originalDomain = getDomainName(url);

@@ -25,13 +25,16 @@ export async function POST(request: NextRequest) {
 
   // Auth gate check
   const { checkFeaturePermission } = await import('@/lib/auth');
-  const permission = await checkFeaturePermission('transcribe');
+  const permission = await checkFeaturePermission('transcribe', ip);
   if (!permission.authorized) {
     return NextResponse.json({
       success: false,
-      error: 'Access Restricted',
-      requiredLevel: permission.requiredLevel
-    }, { status: 403 });
+      error: permission.limitReached 
+        ? `Daily limit of ${permission.maxLimit} transcribes reached. Please upgrade to unlock more!` 
+        : 'Access Restricted',
+      requiredLevel: permission.requiredLevel,
+      limitReached: permission.limitReached
+    }, { status: permission.limitReached ? 429 : 403 });
   }
 
   try {

@@ -528,27 +528,148 @@ interface ExtraOverlay {
   backgroundColor?: string;
 }
 
-const CAPTION_PRESETS = [
-  { id: 'tiktok-bold', name: 'TikTok Bold', style: { fontFamily: '"Impact", sans-serif', color: '#FFFF00', textShadow: '2px 2px 0px #000, -2px -2px 0px #000, 2px -2px 0px #000, -2px 2px 0px #000', fontSize: '26px', fontWeight: 'bold', textTransform: 'uppercase' } },
-  { id: 'classic-white', name: 'Netflix Classic', style: { fontFamily: 'sans-serif', color: '#FFFFFF', textShadow: '1px 1px 3px rgba(0,0,0,0.8)', fontSize: '22px' } },
-  { id: 'neon-cyan', name: 'Neon Cyber', style: { fontFamily: '"Arial Black", sans-serif', color: '#00FFFF', textShadow: '0 0 10px #00FFFF, 0 0 20px #00FFFF', fontSize: '24px', fontWeight: 'bold' } },
-  { id: 'neon-pink', name: 'Neon Pink', style: { fontFamily: '"Arial Black", sans-serif', color: '#FF00FF', textShadow: '0 0 10px #FF00FF, 0 0 20px #FF00FF', fontSize: '24px', fontWeight: 'bold' } },
-  { id: 'arcade', name: 'Arcade Retro', style: { fontFamily: '"Courier New", monospace', color: '#00FF00', backgroundColor: 'rgba(0,0,0,0.7)', padding: '4px 8px', borderRadius: '4px', fontSize: '20px', letterSpacing: '2px' } },
-  { id: 'comic', name: 'Comic Bubble', style: { fontFamily: '"Comic Sans MS", cursive', color: '#FFD750', textShadow: '2px 2px 0px #FF4500', fontSize: '24px', fontWeight: 'bold' } },
-  { id: 'minimal-black', name: 'Minimal Box', style: { fontFamily: 'sans-serif', color: '#FFFFFF', backgroundColor: '#000000', padding: '6px 12px', fontSize: '20px', fontWeight: 'medium' } },
-  { id: 'royal-gold', name: 'Royal Gold', style: { fontFamily: '"Times New Roman", serif', color: '#FFD700', textShadow: '1px 1px 2px #000000', fontSize: '24px', fontStyle: 'italic' } },
-  { id: 'vhs-glitch', name: 'VHS Glitch', style: { fontFamily: 'monospace', color: '#FFFFFF', textShadow: '2px 0 0 #FF0000, -2px 0 0 #0000FF', fontSize: '22px' } },
-  { id: 'gradient-sunset', name: 'Sunset Gradient', style: { fontFamily: '"Impact", sans-serif', color: '#FF4500', textShadow: '1px 1px 0px #FFFF00', fontSize: '26px', fontWeight: 'bold' } },
-  { id: 'bold-red', name: 'Alert Red', style: { fontFamily: 'sans-serif', color: '#FF0000', fontWeight: '900', textShadow: '1px 1px 1px #000', fontSize: '28px', textTransform: 'uppercase' } },
-  { id: 'speech', name: 'Speech Bubble', style: { fontFamily: 'sans-serif', color: '#000000', backgroundColor: '#FFFFFF', border: '2px solid #000', borderRadius: '15px', padding: '8px 16px', fontSize: '20px' } },
-  { id: 'crayon', name: 'Crayon Soft', style: { fontFamily: 'sans-serif', color: '#FFB6C1', textShadow: '1px 1px 0px #DDA0DD', fontSize: '24px', fontWeight: 'bold' } },
-  { id: 'monospace-orange', name: 'Console Orange', style: { fontFamily: 'monospace', color: '#FFA500', fontSize: '20px' } },
-  { id: 'clean-grey', name: 'Subtle Outline', style: { fontFamily: 'sans-serif', color: '#F5F5F5', textShadow: '0px 0px 4px #808080', fontSize: '22px' } },
-  { id: 'shadow-yellow', name: 'Shadow Yellow', style: { fontFamily: 'sans-serif', color: '#FFFF00', textShadow: '3px 3px 0px rgba(0,0,0,0.6)', fontSize: '24px', fontWeight: 'bold' } },
-  { id: 'heavy-metal', name: 'Heavy Metal', style: { fontFamily: '"Impact", sans-serif', color: '#708090', textShadow: '2px 2px 2px #000', fontSize: '26px', letterSpacing: '1px' } },
-  { id: 'chalkboard', name: 'Chalk White', style: { fontFamily: 'cursive', color: '#F0FFF0', textShadow: '1px 1px 2px #2F4F4F', fontSize: '22px' } },
-  { id: 'cyberpunk-yellow', name: 'Cyberpunk Solid', style: { fontFamily: '"Arial Black", sans-serif', color: '#000000', backgroundColor: '#FFFF00', padding: '6px 10px', fontSize: '22px', fontWeight: 'black' } },
-  { id: 'future-green', name: 'Matrix Digital', style: { fontFamily: 'monospace', color: '#00FF00', textShadow: '0 0 5px #00FF00', fontSize: '22px' } }
+// Caption style preset type
+type CaptionPreset = {
+  id: string;
+  name: string;
+  badge?: string;
+  fontFamily: string;
+  defaultColor: string;
+  style: {
+    fontSize: string;
+    fontWeight?: string;
+    fontStyle?: string;
+    textTransform?: string;
+    letterSpacing?: string;
+    lineHeight?: string;
+    textShadow?: string;
+    WebkitTextStroke?: string;
+    backgroundColor?: string;
+    padding?: string;
+    borderRadius?: string;
+    border?: string;
+  };
+};
+
+const CAPTION_PRESETS: CaptionPreset[] = [
+  {
+    id: 'voltage',
+    name: 'Voltage',
+    badge: 'Popular',
+    fontFamily: '"Bebas Neue", Impact, sans-serif',
+    defaultColor: '#FAFF00',
+    style: { fontSize: '30px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', textShadow: '3px 3px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000' }
+  },
+  {
+    id: 'ghost-line',
+    name: 'Ghost Line',
+    fontFamily: '"Outfit", sans-serif',
+    defaultColor: '#FFFFFF',
+    style: { fontSize: '24px', fontWeight: '300', letterSpacing: '1px', textShadow: '0 0 18px rgba(255,255,255,0.8), 0 0 5px rgba(255,255,255,0.4)' }
+  },
+  {
+    id: 'neon-pulse',
+    name: 'Neon Pulse',
+    badge: 'Glow',
+    fontFamily: '"Orbitron", sans-serif',
+    defaultColor: '#00FFD1',
+    style: { fontSize: '20px', fontWeight: '700', letterSpacing: '3px', textShadow: '0 0 8px #00FFD1, 0 0 20px #00FFD1, 0 0 40px rgba(0,255,209,0.4)' }
+  },
+  {
+    id: 'ink-drop',
+    name: 'Ink Drop',
+    fontFamily: '"Playfair Display", Georgia, serif',
+    defaultColor: '#FFFFFF',
+    style: { fontSize: '26px', fontWeight: '700', fontStyle: 'italic', textShadow: '2px 4px 8px rgba(0,0,0,0.9)' }
+  },
+  {
+    id: 'street-tag',
+    name: 'Street Tag',
+    badge: 'Bold',
+    fontFamily: '"Permanent Marker", cursive',
+    defaultColor: '#FF3D00',
+    style: { fontSize: '28px', fontWeight: '400', textShadow: '2px 2px 0px #000, -1px -1px 0px #000' }
+  },
+  {
+    id: 'clean-pill',
+    name: 'Clean Pill',
+    fontFamily: '"Inter", system-ui, sans-serif',
+    defaultColor: '#FFFFFF',
+    style: { fontSize: '18px', fontWeight: '600', backgroundColor: 'rgba(0,0,0,0.75)', padding: '6px 16px', borderRadius: '999px', letterSpacing: '0.3px' }
+  },
+  {
+    id: 'gold-rush',
+    name: 'Gold Rush',
+    fontFamily: '"Cinzel", "Times New Roman", serif',
+    defaultColor: '#FFD700',
+    style: { fontSize: '24px', fontWeight: '700', letterSpacing: '2px', textShadow: '1px 1px 0px #7A5900, 2px 2px 0px #3D2C00' }
+  },
+  {
+    id: 'matrix-code',
+    name: 'Matrix Code',
+    badge: 'Retro',
+    fontFamily: '"Share Tech Mono", "Courier New", monospace',
+    defaultColor: '#00FF41',
+    style: { fontSize: '20px', fontWeight: '400', letterSpacing: '2px', textShadow: '0 0 6px #00FF41, 0 0 12px rgba(0,255,65,0.3)' }
+  },
+  {
+    id: 'blizzard',
+    name: 'Blizzard',
+    fontFamily: '"Exo 2", sans-serif',
+    defaultColor: '#FFFFFF',
+    style: { fontSize: '26px', fontWeight: '800', textTransform: 'uppercase', WebkitTextStroke: '2px rgba(150,200,255,0.8)', textShadow: '0 0 15px rgba(150,200,255,0.6)' }
+  },
+  {
+    id: 'velvet-box',
+    name: 'Velvet Box',
+    fontFamily: '"DM Sans", sans-serif',
+    defaultColor: '#FFFFFF',
+    style: { fontSize: '18px', fontWeight: '500', backgroundColor: 'rgba(90,20,130,0.85)', padding: '7px 18px', borderRadius: '8px', border: '1px solid rgba(200,100,255,0.4)' }
+  },
+  {
+    id: 'solar-flare',
+    name: 'Solar Flare',
+    badge: 'Vivid',
+    fontFamily: '"Oswald", Impact, sans-serif',
+    defaultColor: '#FF6B00',
+    style: { fontSize: '28px', fontWeight: '700', textTransform: 'uppercase', textShadow: '0 2px 0px #FF0000, 2px 4px 0px rgba(0,0,0,0.5)' }
+  },
+  {
+    id: 'ice-crystal',
+    name: 'Ice Crystal',
+    fontFamily: '"Rajdhani", sans-serif',
+    defaultColor: '#A8EEFF',
+    style: { fontSize: '24px', fontWeight: '600', letterSpacing: '3px', textTransform: 'uppercase', textShadow: '0 0 10px rgba(168,238,255,0.9), 0 0 25px rgba(100,200,255,0.5)' }
+  },
+  {
+    id: 'chalk-dust',
+    name: 'Chalk Dust',
+    fontFamily: '"Caveat", cursive',
+    defaultColor: '#F0F0E8',
+    style: { fontSize: '28px', fontWeight: '700', textShadow: '1px 1px 3px rgba(0,0,0,0.6)' }
+  },
+  {
+    id: 'cyber-slice',
+    name: 'Cyber Slice',
+    badge: 'Sharp',
+    fontFamily: '"Teko", sans-serif',
+    defaultColor: '#000000',
+    style: { fontSize: '30px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '2px', backgroundColor: '#FAFF00', padding: '4px 14px', borderRadius: '2px' }
+  },
+  {
+    id: 'drift-mono',
+    name: 'Drift Mono',
+    fontFamily: '"Space Mono", monospace',
+    defaultColor: '#C8FF80',
+    style: { fontSize: '18px', fontWeight: '700', letterSpacing: '1px', textShadow: '1px 1px 0px rgba(0,0,0,0.8)' }
+  },
+  {
+    id: 'midnight-soft',
+    name: 'Midnight Soft',
+    fontFamily: '"Nunito", sans-serif',
+    defaultColor: '#E8D5FF',
+    style: { fontSize: '22px', fontWeight: '800', textShadow: '0 2px 12px rgba(150,80,255,0.7)' }
+  },
 ];
 
 export default function Home() {
@@ -637,6 +758,9 @@ export default function Home() {
 
   // Initialize Google Sign-In SDK
   useEffect(() => {
+    // Only proceed if session has finished loading
+    if (isSessionLoading) return;
+
     const initGoogleSignIn = () => {
       if (typeof window !== 'undefined' && (window as any).google?.accounts?.id) {
         const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
@@ -653,8 +777,18 @@ export default function Home() {
           use_fedcm_for_prompt: false,
         });
 
-        // Prompt one-tap auth
-        (window as any).google.accounts.id.prompt();
+        // Only prompt One-Tap if user is NOT logged in
+        if (!currentUser) {
+          (window as any).google.accounts.id.prompt((notification: any) => {
+            if (notification.isNotDisplayed()) {
+              console.log('Google One-Tap not displayed:', notification.getNotDisplayedReason());
+            } else if (notification.isSkippedMoment()) {
+              console.log('Google One-Tap skipped:', notification.getSkippedReason());
+            } else if (notification.isDismissedMoment()) {
+              console.log('Google One-Tap dismissed:', notification.getDismissedReason());
+            }
+          });
+        }
       }
     };
 
@@ -666,7 +800,7 @@ export default function Home() {
     }, 500);
 
     return () => clearInterval(checkInterval);
-  }, []);
+  }, [isSessionLoading, currentUser]);
 
   // Render Google Sign-In Button inside auth modal
   useEffect(() => {
@@ -700,7 +834,9 @@ export default function Home() {
   const [editorVideoUrl, setEditorVideoUrl] = useState('');
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isResolvingVideo, setIsResolvingVideo] = useState(false);
-  const [editorStylePreset, setEditorStylePreset] = useState('tiktok-bold');
+  const [editorStylePreset, setEditorStylePreset] = useState('voltage');
+  const [editorCaptionColor, setEditorCaptionColor] = useState(''); // '' = use preset default
+  const [editorCaptionFont, setEditorCaptionFont] = useState('');  // '' = use preset default
   const [editorCurrentTime, setEditorCurrentTime] = useState(0);
   const [editorExtraOverlays, setEditorExtraOverlays] = useState<ExtraOverlay[]>([]);
   const [videoAspectRatio, setVideoAspectRatio] = useState<'landscape' | 'portrait'>('landscape');
@@ -781,34 +917,52 @@ export default function Home() {
   };
 
   const handleLaunchCaptionEditor = async () => {
-    if (!result || !result.url) return;
+    console.log('[handleLaunchCaptionEditor] Started. Result URL:', result?.url, 'Result Platform:', result?.platform);
+    if (!result || !result.url) {
+      console.warn('[handleLaunchCaptionEditor] No result or result URL found, aborting.');
+      return;
+    }
+
+    if (!currentUser) {
+      setAuthModalRequiredLevel('registered');
+      setAuthModalMode('signup');
+      setAuthError('Please register or log in to use the Video Caption Studio!');
+      setIsAuthModalOpen(true);
+      return;
+    }
     setIsEditorOpen(true);
     setIsResolvingVideo(true);
     setEditorSubtitles([]);
     
     let resolvedVideo = '';
     const isDirectVid = /\.(mp4|webm|ogg|mov|m4v|3gp|avi)(\?.*)?$/i.test(result.url);
+    console.log('[handleLaunchCaptionEditor] isDirectVid:', isDirectVid);
     if (isDirectVid || result.platform === 'direct-video') {
+      console.log('[handleLaunchCaptionEditor] Using direct video URL:', result.url);
       resolvedVideo = result.url;
       setEditorVideoUrl(result.url);
       setIsResolvingVideo(false);
     } else {
       try {
+        console.log('[handleLaunchCaptionEditor] Resolving video URL via /api/download-media...');
         const res = await fetch('/api/download-media', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: result.url, downloadMode: 'video' })
         });
+        console.log('[handleLaunchCaptionEditor] /api/download-media status:', res.status);
         const data = await res.json();
+        console.log('[handleLaunchCaptionEditor] /api/download-media response:', data);
         if (data.success && data.downloadUrl) {
           resolvedVideo = data.downloadUrl;
           setEditorVideoUrl(data.downloadUrl);
         } else {
+          console.warn('[handleLaunchCaptionEditor] /api/download-media failed or returned no URL, using fallback.');
           resolvedVideo = result.url;
           setEditorVideoUrl(result.url);
         }
       } catch (err) {
-        console.error('Failed to resolve Cobalt video:', err);
+        console.error('[handleLaunchCaptionEditor] Failed to resolve Cobalt video:', err);
         resolvedVideo = result.url;
         setEditorVideoUrl(result.url);
       } finally {
@@ -819,9 +973,12 @@ export default function Home() {
     // Auth gate check
     let resolvedSubRes = null;
     try {
+      console.log('[handleLaunchCaptionEditor] Fetching subtitles via /api/subtitles...');
       resolvedSubRes = await fetch(`/api/subtitles?url=${encodeURIComponent(result.url)}`);
+      console.log('[handleLaunchCaptionEditor] /api/subtitles status:', resolvedSubRes.status);
       if (resolvedSubRes.status === 403) {
         const errorData = await resolvedSubRes.json().catch(() => ({}));
+        console.warn('[handleLaunchCaptionEditor] Subtitles returned 403, auth gate triggered.', errorData);
         setAuthModalRequiredLevel(errorData.requiredLevel || 'registered');
         setAuthModalMode('signup');
         setIsAuthModalOpen(true);
@@ -829,32 +986,40 @@ export default function Home() {
         setIsEditorOpen(false);
         return;
       }
-    } catch {}
+    } catch (subErr) {
+      console.error('[handleLaunchCaptionEditor] Error fetching subtitles:', subErr);
+    }
 
     let parsedList: SubtitleItem[] = [];
     if (transcriptionWords && transcriptionWords.length > 0) {
+      console.log('[handleLaunchCaptionEditor] Using pre-transcribed words to build subtitles.');
       parsedList = buildSubtitlesFromWords(transcriptionWords);
     } else if (resolvedSubRes && resolvedSubRes.ok) {
       try {
         const subData = await resolvedSubRes.json();
+        console.log('[handleLaunchCaptionEditor] Subtitles response data success:', subData.success);
         if (subData.success && subData.srt) {
           parsedList = parseSrt(subData.srt);
         }
       } catch (err) {
-        console.warn('Failed to auto-fetch subtitles for editor:', err);
+        console.warn('[handleLaunchCaptionEditor] Failed to auto-fetch subtitles for editor:', err);
       }
     }
 
-    if (parsedList.length === 0) {
-      parsedList = [
-        { index: 1, start: 1, end: 4, text: "Welcome to LinkToPreview Video Editor! 🚀" },
-        { index: 2, start: 5, end: 9, text: "Click styles on the right to change designs dynamically. ✨" },
-        { index: 3, start: 10, end: 14, text: "You can sync your voice and type custom overlays! 🎬" }
-      ];
-    }
+    // If no subtitles fetched, leave the list empty so user can auto-sync or add manually
+    // No default placeholder text
+    
+    console.log('[handleLaunchCaptionEditor] Setting editor subtitles. Count:', parsedList.length);
     setEditorSubtitles(parsedList);
+    
+    console.log('[handleLaunchCaptionEditor] Scrolling to editor container...');
     setTimeout(() => {
-      editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (editorRef.current) {
+        editorRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        console.log('[handleLaunchCaptionEditor] Scroll trigger fired successfully.');
+      } else {
+        console.warn('[handleLaunchCaptionEditor] editorRef.current is null! Could not scroll.');
+      }
     }, 200);
   };
 
@@ -1280,9 +1445,28 @@ export default function Home() {
     };
   }, [isLoading]);
 
-  // Fetch lazy loaded assets data on-demand
   const fetchLazyData = async (scanType: 'intel' | 'lighthouse' | 'ai-research' | 'ai-writer' | 'trust-safety') => {
     if (!result) return;
+
+    // Client-side quick check
+    const registeredFeatures = ['intel', 'ai-research', 'trust-safety'];
+    const proFeatures = ['ai-writer'];
+
+    if (!currentUser && (registeredFeatures.includes(scanType) || proFeatures.includes(scanType))) {
+      setAuthModalRequiredLevel('registered');
+      setAuthModalMode('signup');
+      setAuthError(`Please register or log in to access the ${scanType === 'intel' ? 'Link Intelligence' : scanType === 'ai-research' ? 'AI Research Summary' : 'AI Content Writer'} feature!`);
+      setIsAuthModalOpen(true);
+      return;
+    }
+
+    if (proFeatures.includes(scanType) && currentUser && currentUser.role !== 'pro' && currentUser.role !== 'admin') {
+      setAuthModalRequiredLevel('pro');
+      setAuthModalMode('signup');
+      setIsAuthModalOpen(true);
+      return;
+    }
+
     setLazyLoadingTab(activeAsset);
     try {
       const res = await fetch('/api/analyze', {
@@ -1827,6 +2011,14 @@ export default function Home() {
     setScreenshotDevice(device);
     if (screenshotData[device]) return;
 
+    if (!currentUser) {
+      setAuthModalRequiredLevel('registered');
+      setAuthModalMode('signup');
+      setAuthError('Please register or log in to use the Live Page Screenshot engine!');
+      setIsAuthModalOpen(true);
+      return;
+    }
+
     setScreenshotLoading(true);
     try {
       const res = await fetch('/api/screenshot', {
@@ -1895,6 +2087,15 @@ export default function Home() {
   // Remove.bg background removal handler
   const handleRemoveBg = async (imageUrl: string) => {
     if (!imageUrl) return;
+
+    if (!currentUser) {
+      setAuthModalRequiredLevel('registered');
+      setAuthModalMode('signup');
+      setAuthError('Please register or log in to use AI Background Removal!');
+      setIsAuthModalOpen(true);
+      return;
+    }
+
     setIsRemovingBg(true);
     setRemovedBgImageUrl(null);
     setRemoveBgError(null);
@@ -1925,9 +2126,17 @@ export default function Home() {
     }
   };
 
-  // AssemblyAI real audio transcription handler
   const handleTranscribe = async (audioUrl: string) => {
     if (!audioUrl) return;
+
+    if (!currentUser) {
+      setAuthModalRequiredLevel('registered');
+      setAuthModalMode('signup');
+      setAuthError('Please register or log in to transcribe video audio!');
+      setIsAuthModalOpen(true);
+      return;
+    }
+
     setIsTranscribing(true);
     setTranscriptionText(null);
     setTranscriptionError(null);
@@ -2275,7 +2484,7 @@ export default function Home() {
   const displayInitial = displayHandle.charAt(0).toUpperCase();
 
   return (
-    <div className="relative flex flex-col items-center justify-between h-screen max-h-screen overflow-hidden z-10 px-4 md:px-8 py-4 md:py-6 dots-bg select-none">
+    <div className="relative flex flex-col items-center justify-between min-h-screen dots-bg bg-[#fcfcfc] text-zinc-800 z-10 px-4 md:px-8 py-4 md:py-6 select-none">
       
       {/* Floating User Account Pill at top right */}
       <div className="absolute top-6 right-6 z-40" ref={profileMenuRef}>
@@ -2311,7 +2520,7 @@ export default function Home() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="font-sans text-xs font-bold text-zinc-800 truncate leading-none mb-1">{displayEmail}</p>
-                    <span className="inline-block px-1.5 py-0.5 bg-violet-50 border border-violet-100 text-violet-750 rounded text-[9px] font-bold uppercase tracking-wider">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-violet-50/70 border border-violet-200/80 text-violet-700 rounded-full text-[9px] font-extrabold uppercase tracking-wider shadow-2xs">
                       {currentUser.role} Account
                     </span>
                   </div>
@@ -2417,7 +2626,7 @@ export default function Home() {
       </header>
 
       {/* Hero Container */}
-      <main className={`w-full max-w-3xl flex-1 flex flex-col items-center text-center z-10 overflow-hidden ${
+      <main className={`w-full max-w-3xl flex-1 flex flex-col items-center text-center z-10 ${
         isLoading || result ? 'justify-start' : 'justify-center'
       }`}>
         
@@ -2522,7 +2731,7 @@ export default function Home() {
 
         {/* Scrollable Content Area */}
         {(isLoading || result || error || isEditorOpen) && (
-          <div className="w-full flex-1 overflow-y-auto mt-4 pr-1.5 pb-6 scrollbar-thin flex flex-col gap-4 text-left">
+          <div className="w-full flex-1 mt-4 pb-6 flex flex-col gap-4 text-left">
             {/* SCANNER STATS MODULE: Platform detector and asset listing */}
         {(isLoading || result) && (
           <div className="w-full mt-5 flex flex-col sm:flex-row items-center justify-between gap-4 text-left animate-slide-up-in">
@@ -2624,6 +2833,46 @@ export default function Home() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Beautiful premium skeleton loader when analyzing link */}
+        {isLoading && !result && (
+          <div className="w-full text-left animate-fade-in z-20">
+            <div className="custom-card rounded-3xl overflow-hidden border border-zinc-200/80 bg-white/95 shadow-xl">
+              <div className="p-6 flex flex-col md:flex-row gap-6">
+                {/* Left: media preview skeleton */}
+                <div className="md:w-1/2 flex flex-col gap-4">
+                  <div className="w-full aspect-video bg-zinc-50 border border-zinc-150 rounded-2xl flex flex-col items-center justify-center p-6 text-center relative overflow-hidden">
+                    <div className="absolute inset-0 bg-linear-to-r from-transparent via-zinc-200/20 to-transparent animate-pulse"></div>
+                    <div className="h-10 w-10 rounded-full bg-zinc-200/80 flex items-center justify-center text-zinc-400 mb-3 animate-pulse">
+                      <LoaderPulsingDots size={6} className="text-zinc-500" />
+                    </div>
+                    <div className="h-3.5 bg-zinc-200/80 rounded w-2/3 animate-pulse mb-2"></div>
+                    <div className="h-3 bg-zinc-150 rounded w-1/2 animate-pulse"></div>
+                  </div>
+                  <div className="h-11 bg-zinc-50 border border-zinc-150 rounded-xl w-full flex items-center justify-center">
+                    <div className="h-3 bg-zinc-200 rounded w-1/3 animate-pulse"></div>
+                  </div>
+                </div>
+                {/* Right: info list skeleton */}
+                <div className="md:w-1/2 flex flex-col gap-5 justify-between">
+                  <div className="space-y-4">
+                    <div className="h-5 bg-zinc-200 rounded w-1/3 animate-pulse"></div>
+                    <div className="space-y-2">
+                      <div className="h-3 bg-zinc-150 rounded w-full animate-pulse"></div>
+                      <div className="h-3 bg-zinc-150 rounded w-5/6 animate-pulse"></div>
+                      <div className="h-3 bg-zinc-150 rounded w-4/5 animate-pulse"></div>
+                      <div className="h-3 bg-zinc-150 rounded w-11/12 animate-pulse"></div>
+                    </div>
+                  </div>
+                  <div className="pt-4 border-t border-zinc-100 flex gap-2.5">
+                    <div className="h-11 bg-zinc-900/5 rounded-xl w-1/3 animate-pulse"></div>
+                    <div className="h-11 bg-zinc-900/10 rounded-xl w-1/2 animate-pulse"></div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -3022,8 +3271,8 @@ export default function Home() {
                               <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-3.5">
                                 <div className="flex items-center justify-between mb-2">
                                   <div className="flex items-center gap-2">
-                                    {transcriptionLanguage && <span className="text-[9px] font-bold text-violet-600 bg-violet-50 border border-violet-100 px-2 py-0.5 rounded-full">🌐 {transcriptionLanguage.toUpperCase()}</span>}
-                                    {transcriptionConfidence !== null && <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">✓ {Math.round(transcriptionConfidence * 100)}% confidence</span>}
+                                    {transcriptionLanguage && <span className="text-[9px] font-extrabold text-violet-700 bg-violet-50/70 border border-violet-200/80 px-2.5 py-1 rounded-full uppercase tracking-wider shadow-2xs">🌐 {transcriptionLanguage.toUpperCase()}</span>}
+                                    {transcriptionConfidence !== null && <span className="text-[9px] font-extrabold text-emerald-700 bg-emerald-50/70 border border-emerald-200/80 px-2.5 py-1 rounded-full uppercase tracking-wider shadow-2xs">✓ {Math.round(transcriptionConfidence * 100)}% confidence</span>}
                                   </div>
                                   <button
                                     onClick={() => handleCopyText(transcriptionText!, 'transcript')}
@@ -3361,23 +3610,36 @@ export default function Home() {
                         </span>
 
                         {!removedBgImageUrl ? (
-                          <button
-                            onClick={() => handleRemoveBg(result.previewUrl!)}
-                            disabled={isRemovingBg}
-                            className="w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed bg-linear-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-md"
-                          >
-                            {isRemovingBg ? (
+                          <div className="space-y-3">
+                            <button
+                              onClick={() => handleRemoveBg(result.previewUrl!)}
+                              disabled={isRemovingBg}
+                              className="w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed bg-linear-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-md"
+                            >
+                              {isRemovingBg ? (
+                                  <>
+                                    <LoaderPulsingDots size={12} className="text-white" />
+                                    <span>Removing background via AI… (30–60s)</span>
+                                  </>
+                              ) : (
                                 <>
-                                  <LoaderPulsingDots size={12} className="text-white" />
-                                  <span>Removing background via AI… (30–60s)</span>
+                                  <Eraser size={15} />
+                                  <span>Remove Image Background</span>
                                 </>
-                            ) : (
-                              <>
-                                <Eraser size={15} />
-                                <span>Remove Image Background</span>
-                              </>
+                              )}
+                            </button>
+                            {isRemovingBg && (
+                              <div className="relative rounded-xl overflow-hidden aspect-video bg-zinc-50 border border-zinc-150 flex items-center justify-center animate-pulse">
+                                <img src={result.previewUrl} className="absolute inset-0 w-full h-full object-cover opacity-20 blur-xs" alt="Background removal in progress" />
+                                <div className="absolute inset-0 bg-linear-to-b from-transparent via-violet-500/10 to-transparent"></div>
+                                <div className="relative z-10 flex flex-col items-center gap-2 text-center p-4">
+                                  <LoaderOrbCircle size={28} className="text-violet-600 animate-spin" />
+                                  <span className="text-xs font-bold text-zinc-700">AI Background Removal Active</span>
+                                  <span className="text-[10px] text-zinc-400">Isolating subject from background...</span>
+                                </div>
+                              </div>
                             )}
-                          </button>
+                          </div>
                         ) : (
                           <div className="space-y-2">
                             <div className="relative rounded-xl overflow-hidden bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiI+PHJlY3Qgd2lkdGg9IjgiIGhlaWdodD0iOCIgZmlsbD0iI2QxZDVkYiIvPjxyZWN0IHg9IjgiIHk9IjgiIHdpZHRoPSI4IiBoZWlnaHQ9IjgiIGZpbGw9IiNkMWQ1ZGIiLz48L3N2Zz4=')]">
@@ -3610,10 +3872,34 @@ export default function Home() {
                     </div>
 
                     {screenshotLoading ? (
-                      <div className="w-full h-72 border border-zinc-100 rounded-xl bg-zinc-50/50 flex flex-col items-center justify-center gap-2">
-                        <LoaderClock size={48} className="text-violet-500" />
-                        <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider">Capturing Live {screenshotDevice} view</span>
-                        <span className="text-[10px] text-zinc-400 font-light">Launching headless browser session...</span>
+                      <div className="w-full border border-zinc-200/80 rounded-xl overflow-hidden bg-zinc-50 shadow-lg mx-auto animate-pulse">
+                        {/* Device browser bar */}
+                        <div className="bg-zinc-100 border-b border-zinc-200 px-3 py-2 flex items-center gap-2 shrink-0 select-none">
+                          <div className="flex gap-1">
+                            <span className="w-2.5 h-2.5 rounded-full bg-zinc-200 block"></span>
+                            <span className="w-2.5 h-2.5 rounded-full bg-zinc-200 block"></span>
+                            <span className="w-2.5 h-2.5 rounded-full bg-zinc-200 block"></span>
+                          </div>
+                          <div className="bg-white rounded px-2.5 py-1 text-[9px] text-zinc-300 flex-1 truncate border border-zinc-200/30 font-mono">
+                            {result.url}
+                          </div>
+                        </div>
+                        {/* Device screen skeleton body */}
+                        <div className={`w-full bg-white flex flex-col items-center justify-center p-8 text-center transition-all duration-300 ${
+                          screenshotDevice === 'mobile' ? 'max-w-70 aspect-9/16' :
+                          screenshotDevice === 'tablet' ? 'max-w-125 aspect-4/3' : 'w-full aspect-video'
+                        }`}>
+                          <div className="relative z-10 space-y-4">
+                            <div className="h-10 w-10 rounded-full bg-violet-50 flex items-center justify-center text-violet-500 animate-spin mx-auto">
+                              <LoaderClock size={20} />
+                            </div>
+                            <div className="space-y-1">
+                              <span className="text-xs font-bold text-zinc-800 block uppercase tracking-wider">Rendering {screenshotDevice} Preview</span>
+                              <span className="text-[10px] text-zinc-400 font-light block">Headless browser rendering page layers...</span>
+                            </div>
+                          </div>
+                          <div className="absolute inset-0 bg-linear-to-r from-transparent via-zinc-100/10 to-transparent animate-pulse pointer-events-none"></div>
+                        </div>
                       </div>
                     ) : screenshotData[screenshotDevice] ? (
                       <div className="flex flex-col items-center gap-3">
@@ -3928,12 +4214,14 @@ export default function Home() {
                                 <div className="border-t border-zinc-100 pt-2 flex items-center justify-between">
                                   <span className="text-[10px] text-zinc-500 font-light">SSL Certificate</span>
                                   {result.sslCertificate?.valid ? (
-                                    <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-md text-[10px] font-bold border border-emerald-100 flex items-center gap-0.5">
-                                      <CheckCircle size={9} /> Secure HTTPS
+                                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50/70 border border-emerald-200/80 text-emerald-700 rounded-full text-[9px] font-extrabold uppercase tracking-wider shadow-2xs">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                      Secure HTTPS
                                     </span>
                                   ) : (
-                                    <span className="px-2 py-0.5 bg-rose-50 text-rose-700 rounded-md text-[10px] font-bold border border-rose-100 flex items-center gap-0.5 animate-pulse">
-                                      <XCircle size={9} /> Insecure (No SSL)
+                                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50/70 border border-rose-200/80 text-rose-700 rounded-full text-[9px] font-extrabold uppercase tracking-wider shadow-2xs animate-pulse">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                                      Insecure (No SSL)
                                     </span>
                                   )}
                                 </div>
@@ -4677,7 +4965,7 @@ export default function Home() {
                         </span>
                         <div className="flex flex-wrap gap-2">
                           {result.techStack.map((tech, i) => (
-                            <span key={i} className="px-2.5 py-1 bg-violet-50 border border-violet-100 text-violet-700 rounded-full text-[10px] font-semibold">{tech}</span>
+                            <span key={i} className="inline-flex items-center px-3 py-1 bg-violet-50/70 border border-violet-200/80 text-violet-750 rounded-full text-[9px] font-extrabold uppercase tracking-wider shadow-2xs">{tech}</span>
                           ))}
                         </div>
                       </div>
@@ -4778,7 +5066,7 @@ export default function Home() {
                                 <button
                                   key={i}
                                   onClick={() => handleCopyText(tag, `tag-${i}`)}
-                                  className={`px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all cursor-pointer ${copiedText[`tag-${i}`] ? 'bg-emerald-100 border border-emerald-200 text-emerald-700' : 'bg-violet-50 border border-violet-100 text-violet-700 hover:bg-violet-100'}`}
+                                className={`inline-flex items-center px-3 py-1 rounded-full text-[9px] font-extrabold uppercase tracking-wider transition-all cursor-pointer shadow-2xs border ${copiedText[`tag-${i}`] ? 'bg-emerald-50/70 border-emerald-200/80 text-emerald-700' : 'bg-violet-50/70 border-violet-200/80 text-violet-700 hover:bg-violet-100/80'}`}
                                 >
                                   {copiedText[`tag-${i}`] ? '✓ ' : ''}{tag}
                                 </button>
@@ -4913,17 +5201,34 @@ export default function Home() {
             {/* Editor Workspace */}
             {isResolvingVideo ? (
               /* SKELETON LOADING for video resolving */
-              <div className="p-6 flex flex-col lg:flex-row gap-6 animate-pulse select-none">
-                {/* Left: video skeleton */}
+              <div className="p-6 flex flex-col lg:flex-row gap-6 select-none bg-zinc-50/50">
+                {/* Left: video skeleton with loading details */}
                 <div className="lg:w-3/5 flex flex-col gap-4">
-                  <div className="w-full aspect-video bg-zinc-100 rounded-2xl"></div>
-                  <div className="h-12 bg-zinc-100 rounded-xl w-full"></div>
+                  <div className="w-full aspect-video bg-white border border-zinc-200/80 rounded-2xl flex flex-col items-center justify-center p-6 text-center shadow-xs relative overflow-hidden">
+                    <div className="absolute inset-0 bg-linear-to-r from-transparent via-zinc-100/30 to-transparent animate-pulse"></div>
+                    <div className="relative z-10 space-y-4">
+                      <div className="h-12 w-12 rounded-full bg-violet-50 flex items-center justify-center text-violet-600 animate-bounce mx-auto">
+                        <Sparkles size={20} className="animate-pulse" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <h3 className="text-sm font-bold text-zinc-900">Preparing Studio Preview</h3>
+                        <p className="text-xs text-zinc-400 max-w-[280px] leading-relaxed mx-auto">
+                          Downloading video source and fetching auto-generated subtitle segments...
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-center gap-1.5 px-3 py-1 bg-zinc-100 rounded-full w-fit mx-auto text-[10px] text-zinc-500 font-semibold border border-zinc-200/40">
+                        <LoaderPulsingDots size={8} className="text-zinc-400" />
+                        <span>Resolving Media Stream</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="h-12 bg-white border border-zinc-200 rounded-xl w-full animate-pulse"></div>
                 </div>
                 {/* Right: sidebar skeleton */}
-                <div className="lg:w-2/5 flex flex-col gap-4">
-                  <div className="h-28 bg-zinc-100 rounded-2xl"></div>
-                  <div className="h-40 bg-zinc-100 rounded-2xl"></div>
-                  <div className="h-52 bg-zinc-100 rounded-2xl"></div>
+                <div className="lg:w-2/5 flex flex-col gap-4 animate-pulse">
+                  <div className="h-28 bg-white border border-zinc-200 rounded-2xl"></div>
+                  <div className="h-40 bg-white border border-zinc-200 rounded-2xl"></div>
+                  <div className="h-52 bg-white border border-zinc-200 rounded-2xl"></div>
                 </div>
               </div>
             ) : (
@@ -4962,10 +5267,16 @@ export default function Home() {
                       );
                       if (!activeSub) return null;
                       const preset = CAPTION_PRESETS.find(p => p.id === editorStylePreset) || CAPTION_PRESETS[0];
+                      const activeColor = editorCaptionColor || preset.defaultColor;
+                      const activeFontFamily = editorCaptionFont || preset.fontFamily;
                       return (
                         <div className="absolute bottom-8 left-4 right-4 flex justify-center text-center pointer-events-none z-10">
                           <span
-                            style={preset.style as React.CSSProperties}
+                            style={{
+                              ...preset.style as React.CSSProperties,
+                              color: activeColor,
+                              fontFamily: activeFontFamily,
+                            }}
                             className="px-3 py-1.5 text-center select-none shadow-lg max-w-full leading-snug"
                           >
                             {activeSub.text}
@@ -5009,11 +5320,12 @@ export default function Home() {
                   <div className="flex flex-col sm:flex-row gap-3 p-4 bg-zinc-50 border border-zinc-200/70 rounded-2xl">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1.5">
-                        <span className="inline-block px-2 py-0.5 bg-zinc-900 text-white text-[9px] font-bold uppercase tracking-wider rounded-md">
+                        <span className="inline-flex items-center px-2.5 py-1 bg-zinc-900/90 text-white text-[9px] font-extrabold uppercase tracking-wider rounded-full border border-zinc-800 shadow-2xs">
                           {result?.platform || 'Video'}
                         </span>
                         {editorSubtitles.length > 0 && (
-                          <span className="inline-block px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-bold uppercase tracking-wider rounded-md">
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50/70 border border-emerald-200/80 text-emerald-700 text-[9px] font-extrabold uppercase tracking-wider rounded-full shadow-2xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                             {editorSubtitles.length} captions synced
                           </span>
                         )}
@@ -5051,7 +5363,8 @@ export default function Home() {
                         </div>
                         <span className="text-xs font-bold text-zinc-800">Auto Caption Sync (AI)</span>
                       </div>
-                      <span className="text-[9px] bg-violet-50 border border-violet-200 text-violet-700 px-2 py-0.5 rounded-md font-bold uppercase tracking-wide">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-violet-50/70 border border-violet-200/80 text-violet-700 text-[9px] font-extrabold uppercase tracking-wider rounded-full shadow-2xs">
+                        <span className="w-1.5 h-1.5 rounded-full bg-violet-500"></span>
                         Hinglish AI
                       </span>
                     </div>
@@ -5119,7 +5432,7 @@ export default function Home() {
                   </div>
 
                   {/* 2) Caption Style Presets */}
-                  <div className="p-5 space-y-3">
+                  <div className="p-5 space-y-4">
                     <div className="flex items-center gap-2 select-none">
                       <div className="h-6 w-6 rounded-lg bg-indigo-50 flex items-center justify-center">
                         <Layers size={12} className="text-indigo-600" />
@@ -5127,25 +5440,131 @@ export default function Home() {
                       <span className="text-xs font-bold text-zinc-800">Caption Style</span>
                       <span className="text-[10px] text-zinc-400">({CAPTION_PRESETS.length} presets)</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto pr-1">
+
+                    {/* Live preview cards grid */}
+                    <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1 scrollbar-thin">
                       {CAPTION_PRESETS.map((preset) => {
                         const isSel = editorStylePreset === preset.id;
+                        const previewColor = (isSel && editorCaptionColor) ? editorCaptionColor : preset.defaultColor;
+                        const previewFont = (isSel && editorCaptionFont) ? editorCaptionFont : preset.fontFamily;
                         return (
                           <button
                             key={preset.id}
-                            onClick={() => setEditorStylePreset(preset.id)}
-                            className={`px-2.5 py-2 rounded-xl border text-xs font-semibold text-left transition-all truncate cursor-pointer select-none ${
+                            onClick={() => {
+                              setEditorStylePreset(preset.id);
+                              // reset overrides when switching preset so new preset's defaults show
+                              setEditorCaptionColor('');
+                              setEditorCaptionFont('');
+                            }}
+                            className={`relative rounded-xl border overflow-hidden cursor-pointer select-none transition-all group ${
                               isSel
-                                ? 'bg-zinc-900 border-zinc-900 text-white shadow-sm'
-                                : 'bg-white border-zinc-200 text-zinc-600 hover:border-zinc-350 hover:bg-zinc-50'
+                                ? 'border-violet-500 ring-2 ring-violet-400/40 shadow-md'
+                                : 'border-zinc-700/60 hover:border-zinc-500'
                             }`}
                           >
-                            <span style={isSel ? {} : { color: preset.style.color }}>
+                            {/* Dark preview background */}
+                            <div className="bg-zinc-950 h-[72px] flex items-center justify-center p-2 relative">
+                              <span
+                                style={{
+                                  ...preset.style as React.CSSProperties,
+                                  color: previewColor,
+                                  fontFamily: previewFont,
+                                  fontSize: '13px', // scaled down for preview card
+                                  letterSpacing: preset.style.letterSpacing ? '0.5px' : undefined,
+                                  padding: preset.style.backgroundColor ? '3px 8px' : undefined,
+                                  lineHeight: '1.2',
+                                  maxWidth: '100%',
+                                  display: 'block',
+                                  textOverflow: 'ellipsis',
+                                  overflow: 'hidden',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                Preview
+                              </span>
+                              {preset.badge && (
+                                <span className="absolute top-1.5 right-1.5 text-[8px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-violet-500/90 text-white">
+                                  {preset.badge}
+                                </span>
+                              )}
+                              {isSel && (
+                                <div className="absolute inset-0 ring-2 ring-inset ring-violet-500/30 rounded-xl pointer-events-none" />
+                              )}
+                            </div>
+                            {/* Label */}
+                            <div className={`px-2 py-1.5 text-center text-[10px] font-semibold border-t ${
+                              isSel ? 'bg-violet-50 border-violet-200 text-violet-700' : 'bg-white border-zinc-100 text-zinc-600'
+                            }`}>
                               {preset.name}
-                            </span>
+                            </div>
                           </button>
                         );
                       })}
+                    </div>
+
+                    {/* Font Family Selector */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Font Family Override</label>
+                      <select
+                        value={editorCaptionFont}
+                        onChange={(e) => setEditorCaptionFont(e.target.value)}
+                        className="w-full bg-white border border-zinc-200 rounded-xl text-xs py-2.5 px-3 text-zinc-700 outline-none focus:ring-2 focus:ring-violet-400/50 focus:border-violet-400 cursor-pointer"
+                      >
+                        <option value="">Default (use preset font)</option>
+                        <option value='"Bebas Neue", Impact, sans-serif'>Bebas Neue — Display</option>
+                        <option value='"Outfit", sans-serif'>Outfit — Modern</option>
+                        <option value='"Orbitron", sans-serif'>Orbitron — Sci-Fi</option>
+                        <option value='"Playfair Display", Georgia, serif'>Playfair Display — Elegant</option>
+                        <option value='"Permanent Marker", cursive'>Permanent Marker — Casual</option>
+                        <option value='"Inter", system-ui, sans-serif'>Inter — Clean</option>
+                        <option value='"Cinzel", "Times New Roman", serif'>Cinzel — Classic</option>
+                        <option value='"Share Tech Mono", monospace'>Share Tech Mono — Tech</option>
+                        <option value='"Exo 2", sans-serif'>Exo 2 — Futuristic</option>
+                        <option value='"Oswald", Impact, sans-serif'>Oswald — Condensed</option>
+                        <option value='"Rajdhani", sans-serif'>Rajdhani — South Asian</option>
+                        <option value='"Caveat", cursive'>Caveat — Handwritten</option>
+                        <option value='"Teko", sans-serif'>Teko — Tall Sans</option>
+                        <option value='"Space Mono", monospace'>Space Mono — Mono</option>
+                        <option value='"Nunito", sans-serif'>Nunito — Rounded</option>
+                        <option value='"DM Sans", sans-serif'>DM Sans — Neutral</option>
+                        <option value='Impact, sans-serif'>Impact — Bold</option>
+                      </select>
+                    </div>
+
+                    {/* Color Picker */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Caption Color</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={editorCaptionColor || (CAPTION_PRESETS.find(p => p.id === editorStylePreset)?.defaultColor ?? '#FFFFFF')}
+                          onChange={(e) => setEditorCaptionColor(e.target.value)}
+                          className="h-9 w-9 rounded-lg border border-zinc-200 cursor-pointer shrink-0 p-0.5 bg-white"
+                        />
+                        <div className="flex-1 flex items-center gap-1.5 flex-wrap">
+                          {['#FFFFFF','#FAFF00','#00FFD1','#FF3D00','#FFD700','#FF00FF','#00FF41','#A8EEFF','#E8D5FF','#FF6B00'].map(c => (
+                            <button
+                              key={c}
+                              onClick={() => setEditorCaptionColor(c)}
+                              title={c}
+                              className={`h-5 w-5 rounded-full border-2 transition-all cursor-pointer ${
+                                (editorCaptionColor || (CAPTION_PRESETS.find(p=>p.id===editorStylePreset)?.defaultColor)) === c
+                                  ? 'border-violet-500 scale-125 shadow-sm'
+                                  : 'border-zinc-300 hover:border-zinc-500'
+                              }`}
+                              style={{ backgroundColor: c }}
+                            />
+                          ))}
+                          {editorCaptionColor && (
+                            <button
+                              onClick={() => setEditorCaptionColor('')}
+                              className="text-[9px] text-zinc-400 hover:text-zinc-600 transition-colors underline cursor-pointer ml-1"
+                            >
+                              reset
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -5158,7 +5577,7 @@ export default function Home() {
                         </div>
                         <span className="text-xs font-bold text-zinc-800">Subtitle Segments</span>
                         {editorSubtitles.length > 0 && (
-                          <span className="text-[9px] bg-emerald-50 border border-emerald-200 text-emerald-700 px-1.5 py-0.5 rounded font-bold">{editorSubtitles.length}</span>
+                          <span className="text-[9px] bg-emerald-50/70 border border-emerald-200/80 text-emerald-700 px-2 py-0.5 rounded-full font-extrabold shadow-2xs">{editorSubtitles.length}</span>
                         )}
                       </div>
                       <button

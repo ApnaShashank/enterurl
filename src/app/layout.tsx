@@ -59,6 +59,15 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
+      <head>
+        {/* Google Fonts for caption presets */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;600;700;800&family=Orbitron:wght@400;700;900&family=Playfair+Display:ital,wght@0,700;1,700&family=Permanent+Marker&family=Cinzel:wght@400;700&family=Share+Tech+Mono&family=Exo+2:wght@400;700;800&family=Oswald:wght@400;700&family=Rajdhani:wght@400;600;700&family=Caveat:wght@700&family=Teko:wght@400;600&family=Space+Mono:wght@400;700&family=Nunito:wght@400;700;800&family=DM+Sans:wght@400;500;700&display=swap"
+          rel="stylesheet"
+        />
+      </head>
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         {children}
         <Script src="https://accounts.google.com/gsi/client" strategy="lazyOnload" />

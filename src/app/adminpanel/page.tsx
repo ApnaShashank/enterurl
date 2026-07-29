@@ -237,12 +237,18 @@ export default function AdminPanel() {
     }
   };
 
-  const handleUpdateConfig = async (featureName: string, requiredLevel: string) => {
+  const handleUpdateConfig = async (
+    featureName: string, 
+    requiredLevel: string, 
+    freeLimit?: number, 
+    registeredLimit?: number, 
+    proLimit?: number
+  ) => {
     try {
       const res = await fetch('/api/admin/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ featureName, requiredLevel })
+        body: JSON.stringify({ featureName, requiredLevel, freeLimit, registeredLimit, proLimit })
       });
       if (res.ok) {
         fetchConfigs();
@@ -846,8 +852,11 @@ export default function AdminPanel() {
                 <thead>
                   <tr className="bg-zinc-100/85 border-b border-zinc-200/60 text-zinc-500 font-bold uppercase tracking-wider select-none">
                     <th className="p-4">API Action Area / Feature</th>
-                    <th className="p-4">Minimum Access Tier Required</th>
-                    <th className="p-4">Current Protection Level</th>
+                    <th className="p-4">Access Tier Required</th>
+                    <th className="p-4">Free Daily Limit</th>
+                    <th className="p-4">Login Daily Limit</th>
+                    <th className="p-4">Pro Daily Limit</th>
+                    <th className="p-4 text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200/50 select-text text-zinc-700">
@@ -860,8 +869,8 @@ export default function AdminPanel() {
                         <td className="p-4">
                           <select
                             value={c.requiredLevel}
-                            onChange={(e) => handleUpdateConfig(c.featureName, e.target.value)}
-                            className="bg-white border border-zinc-200 text-zinc-700 rounded-xl text-xs py-1.5 px-3 outline-none cursor-pointer focus:border-zinc-300 shadow-sm"
+                            onChange={(e) => handleUpdateConfig(c.featureName, e.target.value, c.freeLimit, c.registeredLimit, c.proLimit)}
+                            className="bg-white border border-zinc-200 text-zinc-700 rounded-xl text-xs py-1.5 px-3 outline-none cursor-pointer focus:border-zinc-300 shadow-sm font-semibold"
                           >
                             <option value="free">Free (Anonymous)</option>
                             <option value="registered">Registered (Login Required)</option>
@@ -869,21 +878,54 @@ export default function AdminPanel() {
                           </select>
                         </td>
                         <td className="p-4">
-                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide border ${
-                            c.requiredLevel === 'pro' 
-                              ? 'bg-rose-50 border-rose-200 text-rose-600' 
-                              : c.requiredLevel === 'registered' 
-                                ? 'bg-violet-50 border-violet-200 text-violet-600' 
-                                : 'bg-emerald-50 border-emerald-200 text-emerald-600'
-                          }`}>
-                            {c.requiredLevel}
-                          </span>
+                          <input
+                            type="number"
+                            value={c.freeLimit !== undefined ? c.freeLimit : 0}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10) || 0;
+                              setConfigs(prev => prev.map(item => item.featureName === c.featureName ? { ...item, freeLimit: val } : item));
+                            }}
+                            className="w-16 bg-white border border-zinc-200 text-zinc-700 rounded-lg text-xs py-1 px-2 focus:ring-1 focus:ring-zinc-400 outline-none text-center font-semibold"
+                          />
+                        </td>
+                        <td className="p-4">
+                          <input
+                            type="number"
+                            value={c.registeredLimit !== undefined ? c.registeredLimit : 0}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10) || 0;
+                              setConfigs(prev => prev.map(item => item.featureName === c.featureName ? { ...item, registeredLimit: val } : item));
+                            }}
+                            className="w-16 bg-white border border-zinc-200 text-zinc-700 rounded-lg text-xs py-1 px-2 focus:ring-1 focus:ring-zinc-400 outline-none text-center font-semibold"
+                          />
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              value={c.proLimit !== undefined ? c.proLimit : -1}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value, 10) === -1 ? -1 : (parseInt(e.target.value, 10) || 0);
+                                setConfigs(prev => prev.map(item => item.featureName === c.featureName ? { ...item, proLimit: val } : item));
+                              }}
+                              className="w-16 bg-white border border-zinc-200 text-zinc-700 rounded-lg text-xs py-1 px-2 focus:ring-1 focus:ring-zinc-400 outline-none text-center font-semibold"
+                            />
+                            <span className="text-[10px] text-zinc-400 font-light select-none">(-1 = ∞)</span>
+                          </div>
+                        </td>
+                        <td className="p-4 text-center">
+                          <button
+                            onClick={() => handleUpdateConfig(c.featureName, c.requiredLevel, c.freeLimit, c.registeredLimit, c.proLimit)}
+                            className="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-[10px] font-bold transition-all cursor-pointer border-0 shadow-sm uppercase tracking-wide"
+                          >
+                            Save Settings
+                          </button>
                         </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={3} className="p-8 text-center text-zinc-400 italic">
+                      <td colSpan={6} className="p-8 text-center text-zinc-400 italic">
                         {isLoadingConfigs ? 'Loading dynamic settings...' : 'No configs loaded.'}
                       </td>
                     </tr>
