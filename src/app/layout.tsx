@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { ClerkProvider } from "@clerk/nextjs";
+import Script from "next/script";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -18,7 +18,6 @@ export const metadata: Metadata = {
   description: "Analyze any link, scrape media, inspect SSL certificates, scan tech stacks, generate screenshots, and run SEO audits instantly on enterurl.vercel.app.",
   metadataBase: new URL('https://enterurl.vercel.app'),
   keywords: ["link analyzer", "website intelligence", "media downloader", "SSL checker", "technology scanner", "SEO audit", "URL preview", "VirusTotal scan", "apnashashank developer"],
-  authors: [{ name: "apnashashank developer" }],
   icons: {
     icon: [
       { url: "https://ik.imagekit.io/DEMOPROJECT/iconenterurl.png", type: "image/png" }
@@ -55,15 +54,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
-      <html
-        lang="en"
-        className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-        suppressHydrationWarning
-      >
-        <body className="min-h-full flex flex-col" suppressHydrationWarning>{children}</body>
-      </html>
-    </ClerkProvider>
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
+    >
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        {children}
+        <Script src="https://accounts.google.com/gsi/client" strategy="lazyOnload" />
+      </body>
+    </html>
   );
 }
 

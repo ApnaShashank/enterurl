@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useUser, useClerk, SignInButton, SignUpButton } from '@clerk/nextjs';
 import Link from 'next/link';
 import { 
   Link as LinkIcon, 
@@ -559,51 +558,99 @@ export default function Home() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'signup' | 'login'>('signup');
   const [authModalRequiredLevel, setAuthModalRequiredLevel] = useState<'registered' | 'pro'>('registered');
-  const [authEmail, setAuthEmail] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
-  const { user: clerkUser, isLoaded: clerkLoaded } = useUser();
-  const { signOut } = useClerk();
-
+  // Fetch session on load
   useEffect(() => {
-    if (clerkLoaded) {
-      if (clerkUser) {
-        fetch('/api/auth/me')
-          .then(res => res.json())
-          .then(data => {
-            if (data.success && data.user) {
-              setCurrentUser(data.user);
-              setIsAuthModalOpen(false);
-            }
-          })
-          .catch(err => console.error('Failed to fetch session on Clerk change:', err));
-      } else {
-        // Fallback: check custom session
-        fetch('/api/auth/me')
-          .then(res => res.json())
-          .then(data => {
-            if (data.success && data.user) {
-              setCurrentUser(data.user);
-            } else {
-              setCurrentUser(null);
-            }
-          })
-          .catch(() => setCurrentUser(null));
-      }
-    }
-  }, [clerkUser, clerkLoaded]);
+    fetch('/api/auth/me')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.user) {
+          setCurrentUser(data.user);
+        }
+      })
+      .catch(err => console.error('Failed to fetch session:', err));
+  }, []);
 
-  const handleAuthSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGoogleLoginSuccess = async (response: any) => {
+    setIsAuthLoading(true);
+    setAuthError(null);
+    try {
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: response.credential }),
+      });
+      const data = await res.json();
+      if (data.success && data.user) {
+        setCurrentUser(data.user);
+        setIsAuthModalOpen(false);
+      } else {
+        setAuthError(data.error || 'Google login failed');
+      }
+    } catch (err) {
+      console.error('Google login error:', err);
+      setAuthError('An error occurred during Google sign-in.');
+    } finally {
+      setIsAuthLoading(false);
+    }
   };
+
+  // Initialize Google Sign-In SDK
+  useEffect(() => {
+    const initGoogleSignIn = () => {
+      if (typeof window !== 'undefined' && (window as any).google?.accounts?.id) {
+        const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+        if (!googleClientId) {
+          console.warn("NEXT_PUBLIC_GOOGLE_CLIENT_ID is not configured in .env.local");
+          return;
+        }
+
+        (window as any).google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: handleGoogleLoginSuccess,
+          auto_select: false,
+          cancel_on_tap_outside: true,
+        });
+
+        // Prompt one-tap auth
+        (window as any).google.accounts.id.prompt();
+      }
+    };
+
+    const checkInterval = setInterval(() => {
+      if ((window as any).google?.accounts?.id) {
+        initGoogleSignIn();
+        clearInterval(checkInterval);
+      }
+    }, 500);
+
+    return () => clearInterval(checkInterval);
+  }, []);
+
+  // Render Google Sign-In Button inside auth modal
+  useEffect(() => {
+    if (isAuthModalOpen && (window as any).google?.accounts?.id) {
+      setTimeout(() => {
+        const btnContainer = document.getElementById('google-signin-btn');
+        if (btnContainer && (window as any).google?.accounts?.id) {
+          (window as any).google.accounts.id.renderButton(
+            btnContainer,
+            { theme: 'outline', size: 'large', width: 320 }
+          );
+        }
+      }, 200);
+    }
+  }, [isAuthModalOpen]);
 
   const handleLogout = async () => {
     try {
-      await signOut();
       await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
       setCurrentUser(null);
+      if ((window as any).google?.accounts?.id) {
+        (window as any).google.accounts.id.disableAutoSelect();
+      }
     } catch (err) {
       console.error('Logout error:', err);
     }
@@ -5133,13 +5180,25 @@ export default function Home() {
               </div>
             ) : (
               <div className="space-y-4">
-                <SignInButton mode="modal">
-                  <button
-                    className="w-full py-3.5 bg-violet-600 hover:bg-violet-750 text-white font-semibold rounded-xl text-xs transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 border-0"
-                  >
-                    <span>{authModalMode === 'signup' ? 'Sign Up with Google' : 'Sign In with Google'}</span>
-                  </button>
-                </SignInButton>
+                {authError && (
+                  <div className="p-3 bg-rose-50 border border-rose-100 text-rose-600 rounded-xl text-xs text-center font-medium">
+                    {authError}
+                  </div>
+                )}
+
+                <div className="flex flex-col items-center justify-center py-2">
+                  {isAuthLoading ? (
+                    <div className="flex items-center justify-center gap-2 py-3 text-xs text-zinc-500 font-medium font-mono select-none">
+                      <svg className="animate-spin h-4 w-4 text-violet-600" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Verifying with Google...
+                    </div>
+                  ) : (
+                    <div id="google-signin-btn" className="w-full flex justify-center"></div>
+                  )}
+                </div>
 
                 <div className="text-center pt-2 select-none">
                   <button

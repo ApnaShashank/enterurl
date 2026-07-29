@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useUser, useClerk, SignInButton } from '@clerk/nextjs';
 import { 
   Lock, 
   User, 
@@ -92,18 +91,93 @@ export default function AdminPanel() {
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [isLoadingConfigs, setIsLoadingConfigs] = useState(false);
 
-  const { user: clerkUser, isLoaded: clerkLoaded } = useUser();
-  const { signOut } = useClerk();
+  const [currentUser, setCurrentUser] = useState<{ email: string; role: 'standard' | 'pro' | 'admin' } | null>(null);
 
+  // Fetch stats and verify admin status on load
   useEffect(() => {
-    if (clerkLoaded) {
-      if (clerkUser) {
-        fetchStats(page, search, actionFilter);
+    fetchStats(page, search, actionFilter);
+  }, [page, search, actionFilter]);
+
+  // Fetch session on load
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.user) {
+          setCurrentUser(data.user);
+        } else {
+          setCurrentUser(null);
+        }
+      })
+      .catch(() => setCurrentUser(null));
+  }, [isAuthenticated]);
+
+  const handleGoogleLoginSuccess = async (response: any) => {
+    setLoginError('');
+    try {
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: response.credential }),
+      });
+      const data = await res.json();
+      if (data.success && data.user) {
+        setCurrentUser(data.user);
+        if (data.user.role === 'admin') {
+          setIsAuthenticated(true);
+          fetchStats(page, search, actionFilter);
+        } else {
+          setIsAuthenticated(false);
+        }
       } else {
-        setIsAuthenticated(false);
+        setLoginError(data.error || 'Google login failed');
       }
+    } catch (err) {
+      console.error('Google login error:', err);
+      setLoginError('An error occurred during Google sign-in.');
     }
-  }, [clerkUser, clerkLoaded]);
+  };
+
+  // Initialize Google SDK
+  useEffect(() => {
+    const initGoogleSignIn = () => {
+      if (typeof window !== 'undefined' && (window as any).google?.accounts?.id) {
+        const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+        if (!googleClientId) return;
+
+        (window as any).google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: handleGoogleLoginSuccess,
+          auto_select: false,
+          cancel_on_tap_outside: true,
+        });
+      }
+    };
+
+    const checkInterval = setInterval(() => {
+      if ((window as any).google?.accounts?.id) {
+        initGoogleSignIn();
+        clearInterval(checkInterval);
+      }
+    }, 500);
+
+    return () => clearInterval(checkInterval);
+  }, []);
+
+  // Render Google button when not logged in
+  useEffect(() => {
+    if (isAuthenticated === false && !currentUser && (window as any).google?.accounts?.id) {
+      setTimeout(() => {
+        const btnContainer = document.getElementById('admin-google-btn');
+        if (btnContainer && (window as any).google?.accounts?.id) {
+          (window as any).google.accounts.id.renderButton(
+            btnContainer,
+            { theme: 'outline', size: 'large', width: 320 }
+          );
+        }
+      }, 200);
+    }
+  }, [isAuthenticated, currentUser]);
 
   useEffect(() => {
     if (activeTab === 'users' && isAuthenticated) {
@@ -237,10 +311,14 @@ export default function AdminPanel() {
 
   const handleLogout = async () => {
     try {
-      await signOut();
+      await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
       setIsAuthenticated(false);
+      setCurrentUser(null);
       setMetrics(null);
       setLogs([]);
+      if ((window as any).google?.accounts?.id) {
+        (window as any).google.accounts.id.disableAutoSelect();
+      }
     } catch (err) {
       console.error('Logout error:', err);
     }
@@ -280,7 +358,7 @@ export default function AdminPanel() {
             <p className="text-xs text-zinc-400 mt-1.5 font-light">Sign in to monitor usage logs and API statuses</p>
           </div>
 
-          {clerkUser ? (
+          {currentUser ? (
             <div className="space-y-5">
               <div className="p-4 bg-rose-50/70 border border-rose-200/80 text-rose-650 rounded-2xl text-xs space-y-2 font-light leading-relaxed">
                 <div className="flex items-center gap-2 font-semibold text-rose-700">
@@ -288,7 +366,7 @@ export default function AdminPanel() {
                   <span>Access Denied</span>
                 </div>
                 <p>
-                  You are signed in as <strong className="font-mono text-zinc-900">{clerkUser.emailAddresses[0]?.emailAddress}</strong>, but this account does not have Administrator permissions.
+                  You are signed in as <strong className="font-mono text-zinc-900">{currentUser.email}</strong>, but this account does not have Administrator permissions.
                 </p>
               </div>
 
@@ -301,13 +379,12 @@ export default function AdminPanel() {
             </div>
           ) : (
             <div className="space-y-4">
-              <SignInButton mode="modal">
-                <button
-                  className="w-full py-3.5 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-xl text-sm transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 border-0"
-                >
-                  Sign In with Google (Admin)
-                </button>
-              </SignInButton>
+              {loginError && (
+                <div className="p-3 bg-rose-50 border border-rose-100 text-rose-600 rounded-xl text-xs text-center font-medium">
+                  {loginError}
+                </div>
+              )}
+              <div id="admin-google-btn" className="w-full flex justify-center py-2"></div>
             </div>
           )}
 
@@ -336,7 +413,7 @@ export default function AdminPanel() {
         </div>
 
         <div className="flex items-center gap-4">
-          <span className="hidden md:inline text-xs text-zinc-500 font-mono">Logged in: shashank8808108802@gmail.com</span>
+          <span className="hidden md:inline text-xs text-zinc-500 font-mono">Logged in: {currentUser?.email}</span>
           <button
             onClick={handleLogout}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 hover:text-zinc-950 rounded-lg text-xs font-semibold cursor-pointer transition-all border border-zinc-200/85"
