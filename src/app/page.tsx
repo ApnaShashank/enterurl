@@ -565,10 +565,12 @@ export default function Home() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isSessionLoading, setIsSessionLoading] = useState(true);
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
   // Fetch session on load
   useEffect(() => {
+    setIsSessionLoading(true);
     fetch('/api/auth/me')
       .then(res => res.json())
       .then(data => {
@@ -576,7 +578,8 @@ export default function Home() {
           setCurrentUser(data.user);
         }
       })
-      .catch(err => console.error('Failed to fetch session:', err));
+      .catch(err => console.error('Failed to fetch session:', err))
+      .finally(() => setIsSessionLoading(false));
   }, []);
 
   // Update session stats when profile dropdown is opened
@@ -647,6 +650,7 @@ export default function Home() {
           callback: handleGoogleLoginSuccess,
           auto_select: false,
           cancel_on_tap_outside: true,
+          use_fedcm_for_prompt: false,
         });
 
         // Prompt one-tap auth
@@ -2233,6 +2237,10 @@ export default function Home() {
 
   const assetBadges = getAssetBadges();
 
+  const currentPlatformKey = (isPlatformMatched || result)
+    ? (result?.platform || matchedPlatform || 'website')
+    : getPlatformMatchKey(rollingIndex);
+
   const displayEmail = currentUser ? currentUser.email.replace(/^www\./i, '') : '';
   const displayHandle = displayEmail.split('@')[0];
   const displayInitial = displayHandle.charAt(0).toUpperCase();
@@ -2242,7 +2250,13 @@ export default function Home() {
       
       {/* Floating User Account Pill at top right */}
       <div className="absolute top-6 right-6 z-40" ref={profileMenuRef}>
-        {currentUser ? (
+        {isSessionLoading ? (
+          /* Premium pulsing skeleton pill */
+          <div className="flex items-center gap-2 p-1 bg-white border border-zinc-200 rounded-full w-28 h-9 animate-pulse select-none justify-between pr-3.5">
+            <div className="h-6.5 w-6.5 rounded-full bg-zinc-200 m-0.5"></div>
+            <div className="h-3 bg-zinc-200 rounded w-14"></div>
+          </div>
+        ) : currentUser ? (
           <div className="relative">
             {/* Interactive Glowing Avatar */}
             <button
@@ -2288,7 +2302,7 @@ export default function Home() {
 
                   <div className="flex items-center justify-between font-medium">
                     <span className="flex items-center gap-1.5">
-                      <Shield size={12} className="text-zinc-400" />
+                      <Shield size={12} className="text-zinc-450" />
                       Daily Base Limit
                     </span>
                     <span className="text-emerald-600 font-bold uppercase tracking-wide text-[9px]">Unlimited</span>
