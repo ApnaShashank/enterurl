@@ -147,6 +147,18 @@ export async function POST(request: NextRequest) {
 
     if (deepgramSucceeded && deepgramResult) {
       try {
+        const { transliterateTextToHinglish, transliterateWordsListToHinglish } = await import('@/lib/transliterate');
+        if (deepgramResult.text) {
+          deepgramResult.text = await transliterateTextToHinglish(deepgramResult.text);
+        }
+        if (deepgramResult.words) {
+          deepgramResult.words = await transliterateWordsListToHinglish(deepgramResult.words);
+        }
+      } catch (transErr) {
+        console.error('Failed to transliterate Deepgram result:', transErr);
+      }
+
+      try {
         await ApiUsageLog.create({
           ip,
           action: 'transcribe',
@@ -267,12 +279,29 @@ export async function GET(request: NextRequest) {
 
     const data = await response.json();
 
+    let text = data.text || null;
+    let words = data.words || null;
+
+    if (data.status === 'completed') {
+      try {
+        const { transliterateTextToHinglish, transliterateWordsListToHinglish } = await import('@/lib/transliterate');
+        if (text) {
+          text = await transliterateTextToHinglish(text);
+        }
+        if (words) {
+          words = await transliterateWordsListToHinglish(words);
+        }
+      } catch (transErr) {
+        console.error('Failed to transliterate AssemblyAI result:', transErr);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       transcriptId: data.id,
       status: data.status, // queued | processing | completed | error
-      text: data.text || null,
-      words: data.words || null,
+      text,
+      words,
       confidence: data.confidence || null,
       duration: data.audio_duration || null,
       language: data.language_code || null,

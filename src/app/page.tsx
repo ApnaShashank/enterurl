@@ -38,9 +38,6 @@ import {
   Activity,
   Shield
 } from 'lucide-react';
-import exifr from 'exifr';
-import QRCode from 'qrcode';
-import { createWorker } from 'tesseract.js';
 
 
 interface AnalysisResult {
@@ -1590,19 +1587,23 @@ export default function Home() {
       };
       img.src = result.previewUrl;
 
-      // 3. Try to read EXIF using exifr
-      exifr.parse(result.previewUrl, {
-        tiff: true,
-        xmp: false,
-        gps: true,
-      }).then(data => {
-        if (data) {
-          setExifData(data);
-        } else {
-          setExifData({ message: 'No EXIF metadata found in this image.' });
-        }
-      }).catch(() => {
-        setExifData({ message: 'Could not read EXIF data (CORS or file type limitations).' });
+      // 3. Try to read EXIF using exifr dynamically
+      import('exifr').then(({ default: exifr }) => {
+        exifr.parse(result.previewUrl!, {
+          tiff: true,
+          xmp: false,
+          gps: true,
+        }).then(data => {
+          if (data) {
+            setExifData(data);
+          } else {
+            setExifData({ message: 'No EXIF metadata found in this image.' });
+          }
+        }).catch(() => {
+          setExifData({ message: 'Could not read EXIF data (CORS or file type limitations).' });
+        });
+      }).catch(err => {
+        console.error('Failed to load exifr:', err);
       });
 
     } else {
@@ -1639,15 +1640,19 @@ export default function Home() {
       // Small timeout to allow element rendering
       setTimeout(() => {
         if (qrCanvasRef.current && result) {
-          QRCode.toCanvas(qrCanvasRef.current, result.url, {
-            width: 140,
-            margin: 1,
-            color: {
-              dark: '#1c1c1e', // custom-card text
-              light: '#f4f4f5' // zinc-100
-            }
-          }, (err) => {
-            if (err) console.error('QR code generation error:', err);
+          import('qrcode').then(({ default: QRCode }) => {
+            QRCode.toCanvas(qrCanvasRef.current!, result.url, {
+              width: 140,
+              margin: 1,
+              color: {
+                dark: '#1c1c1e', // custom-card text
+                light: '#f4f4f5' // zinc-100
+              }
+            }, (err) => {
+              if (err) console.error('QR code generation error:', err);
+            });
+          }).catch(err => {
+            console.error('Failed to load qrcode:', err);
           });
         }
       }, 100);
@@ -2053,6 +2058,7 @@ export default function Home() {
     setOcrStatus('Initializing OCR worker...');
     setOcrText(null);
     try {
+      const { createWorker } = await import('tesseract.js');
       const worker = await createWorker('eng');
       setOcrProgress(40);
       setOcrStatus('Running OCR text analysis...');

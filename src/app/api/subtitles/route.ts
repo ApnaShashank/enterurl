@@ -97,10 +97,14 @@ export async function GET(request: NextRequest) {
       } catch (logErr) {}
     }
 
+    // Transliterate Devanagari Hindi text to Hinglish
+    const { transliterateTextToHinglish } = await import('@/lib/transliterate');
+    const hinglishSrt = await transliterateTextToHinglish(srt);
+
     // Return SRT
     return NextResponse.json({
       success: true,
-      srt,
+      srt: hinglishSrt,
       videoId,
       title: 'YouTube Subtitles'
     });

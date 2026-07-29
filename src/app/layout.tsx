@@ -14,10 +14,28 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "EnterURL - Advanced Link & Website Intelligence Analyzer",
-  description: "Analyze any link, scrape media, inspect SSL certificates, scan tech stacks, generate screenshots, and run SEO audits instantly on enterurl.vercel.app.",
+  title: "EnterURL - Insta Save, YT Save, Video to Caption & Link Analyzer",
+  description: "EnterURL is the ultimate utility: Insta Save for Instagram reels, YT Save for YouTube videos/shorts, Video to Caption generator, SSL checker, and link security audits.",
   metadataBase: new URL('https://enterurl.vercel.app'),
-  keywords: ["link analyzer", "website intelligence", "media downloader", "SSL checker", "technology scanner", "SEO audit", "URL preview", "VirusTotal scan", "apnashashank developer"],
+  keywords: [
+    "enterurl", 
+    "insta save", 
+    "yt save", 
+    "video to caption", 
+    "instagram save", 
+    "youtube save", 
+    "instagram reels downloader", 
+    "youtube shorts downloader", 
+    "video to subtitles", 
+    "hinglish transcript generator",
+    "link analyzer", 
+    "website intelligence", 
+    "media downloader", 
+    "SSL checker", 
+    "technology scanner", 
+    "SEO audit", 
+    "apnashashank developer"
+  ],
   icons: {
     icon: [
       { url: "https://ik.imagekit.io/DEMOPROJECT/iconenterurl.png", type: "image/png" }
@@ -25,8 +43,8 @@ export const metadata: Metadata = {
     apple: "https://ik.imagekit.io/DEMOPROJECT/iconenterurl.png",
   },
   openGraph: {
-    title: "EnterURL - Advanced Link & Website Intelligence Analyzer",
-    description: "Analyze any link, scrape media, inspect SSL certificates, scan tech stacks, generate screenshots, and run SEO audits instantly.",
+    title: "EnterURL - Insta Save, YT Save, Video to Caption & Link Analyzer",
+    description: "All-in-one link intelligence tool. Instantly run Insta Save, YT Save, Video to Caption transcripts, SSL checker, and security scans.",
     url: "https://enterurl.vercel.app",
     siteName: "EnterURL",
     images: [
@@ -42,8 +60,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "EnterURL - Advanced Link & Website Intelligence Analyzer",
-    description: "Analyze any link, inspect SSL certificates, scan tech stacks, and generate screenshots instantly.",
+    title: "EnterURL - Insta Save, YT Save, Video to Caption & Link Analyzer",
+    description: "Instantly run Insta Save, YT Save, Video to Caption transcripts, SSL checker, and security scans.",
     images: ["https://ik.imagekit.io/DEMOPROJECT/iconenterurl.png"],
   },
 };
@@ -53,6 +71,30 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "EnterURL",
+    "url": "https://enterurl.vercel.app",
+    "description": "All-in-one utility tool for link analysis, website intelligence, instagram media saving (Insta Save), youtube downloader (YT Save), and AI video-to-caption transcription.",
+    "applicationCategory": "MultimediaApplication",
+    "operatingSystem": "All",
+    "offers": {
+      "@type": "Offer",
+      "price": "0.00",
+      "priceCurrency": "USD"
+    },
+    "featureList": [
+      "Insta Save (Instagram Downloader)",
+      "YT Save (YouTube Downloader)",
+      "Video to Caption (AI Subtitle Generator)",
+      "Website Technology Scanner",
+      "SSL Certificate Inspector",
+      "VirusTotal Security Scanner",
+      "Live Web Screenshots"
+    ]
+  };
+
   return (
     <html
       lang="en"
@@ -66,6 +108,10 @@ export default function RootLayout({
         <link
           href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;600;700;800&family=Orbitron:wght@400;700;900&family=Playfair+Display:ital,wght@0,700;1,700&family=Permanent+Marker&family=Cinzel:wght@400;700&family=Share+Tech+Mono&family=Exo+2:wght@400;700;800&family=Oswald:wght@400;700&family=Rajdhani:wght@400;600;700&family=Caveat:wght@700&family=Teko:wght@400;600&family=Space+Mono:wght@400;700&family=Nunito:wght@400;700;800&family=DM+Sans:wght@400;500;700&display=swap"
           rel="stylesheet"
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
       </head>
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
