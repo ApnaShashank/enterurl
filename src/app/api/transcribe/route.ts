@@ -7,11 +7,11 @@ const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY || '';
 const ASSEMBLYAI_BASE = 'https://api.assemblyai.com/v2';
 
 const COBALT_INSTANCES = [
-  'https://api.cobalt.liubquanti.click',
   'https://cobaltapi.cjs.nz',
   'https://cobaltapi.kittycat.boo',
-  'https://cobalt.moe/api',
+  'https://api.cobalt.liubquanti.click',
   'https://cobalt.drgns.space',
+  'https://cobalt.moe/api',
   'https://cobalt.k6.vc',
   'https://cobalt.sh1nypanda.com'
 ];
@@ -159,6 +159,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Fallback to AssemblyAI (Asynchronous, polled)
+    // language_detection + code_switching enables Hinglish (Hindi+English mix) transcription
     const response = await fetch(`${ASSEMBLYAI_BASE}/transcript`, {
       method: 'POST',
       headers: {
@@ -168,8 +169,10 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({
         audio_url: resolvedAudioUrl,
         language_detection: true,
+        language_code: 'hi',
         punctuate: true,
         format_text: true,
+        speech_model: 'best',
       }),
       signal: AbortSignal.timeout(15000),
     });

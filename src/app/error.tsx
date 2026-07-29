@@ -17,7 +17,7 @@ export default function Error({
   return (
     <div className="min-h-screen bg-[#fcfcfc] text-zinc-800 flex flex-col justify-center items-center px-4 relative overflow-hidden dots-bg font-sans">
       {/* Background Ambient Glows */}
-      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[450px] h-[450px] bg-rose-600/5 blur-[130px] rounded-full pointer-events-none"></div>
+      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-112.5 h-112.5 bg-rose-600/5 blur-[130px] rounded-full pointer-events-none"></div>
 
       <div className="w-full max-w-md bg-white/70 border border-zinc-200/80 rounded-3xl p-6 sm:p-10 shadow-2xl backdrop-blur-xl relative z-10 text-center animate-scale-up-in select-text">
         <div className="h-16 w-16 bg-rose-50 border border-rose-100 rounded-2xl flex items-center justify-center text-rose-600 mx-auto mb-6 shadow-sm select-none">
@@ -27,7 +27,7 @@ export default function Error({
         <h1 className="text-2xl font-black text-zinc-900 tracking-tight leading-none mb-2 select-none">System Glitch</h1>
         <h2 className="text-xs font-bold text-rose-600 tracking-wider uppercase mb-4 select-none">An unexpected error occurred</h2>
         
-        <div className="bg-rose-50/50 border border-rose-100/50 rounded-2xl p-4 text-[10px] text-left text-rose-700 font-mono break-all max-h-[140px] overflow-y-auto mb-6 scrollbar-thin">
+        <div className="bg-rose-50/50 border border-rose-100/50 rounded-2xl p-4 text-[10px] text-left text-rose-700 font-mono break-all max-h-35 overflow-y-auto mb-6 scrollbar-thin">
           <span className="font-bold block mb-1">Diagnostic Details:</span>
           {error.message || 'Unknown render failure'}
           {error.digest && (

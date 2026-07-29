@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import { connectToDatabase } from '@/lib/db';
 import ApiUsageLog from '@/models/ApiUsageLog';
+import { YoutubeTranscript } from 'youtube-transcript';
 
 function getYoutubeVideoId(url: string): string | null {
   const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=|shorts\/)([^#\&\?]*).*/;
@@ -42,130 +44,84 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    console.log(`Fetching subtitles for YouTube video ID: ${videoId}`);
+    console.log(`Fetching subtitles for YouTube video ID: ${videoId} using youtube-transcript library`);
     
-    // Fetch watch page to parse captions track list
-    const watchPageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9'
-      },
-      signal: AbortSignal.timeout(10000)
-    });
-
-    if (!watchPageRes.ok) {
-      throw new Error(`Failed to fetch YouTube watch page (status: ${watchPageRes.status})`);
-    }
-
-    const html = await watchPageRes.text();
-    let ytData: any = null;
-
-    try {
-      const match = html.match(/ytInitialPlayerResponse\s*=\s*({.+?})\s*;/);
-      if (match) {
-        ytData = JSON.parse(match[1]);
-      } else {
-        const altMatch = html.match(/ytInitialPlayerResponse\s*=\s*({.+?})\s*<\/script>/);
-        if (altMatch) {
-          ytData = JSON.parse(altMatch[1]);
-        }
-      }
-    } catch (err: any) {
-      console.error('Failed to parse ytInitialPlayerResponse:', err.message);
-    }
-
-    let subtitleUrl = '';
-    const captionTracks = ytData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-
-    if (captionTracks && captionTracks.length > 0) {
-      // Prefer English, then auto-generated English, then first available
-      const enTrack = captionTracks.find((t: any) => t.languageCode === 'en' && !t.vssId.startsWith('a.'));
-      const autoEnTrack = captionTracks.find((t: any) => t.languageCode === 'en');
-      const selectedTrack = enTrack || autoEnTrack || captionTracks[0];
-      
-      subtitleUrl = selectedTrack.baseUrl;
-    }
-
-    // Fallback: If watch page parsing failed, try calling public timedtext API directly
-    if (!subtitleUrl) {
-      subtitleUrl = `https://www.youtube.com/api/timedtext?lang=en&v=${videoId}`;
-    }
-
-    console.log(`Downloading subtitles from: ${subtitleUrl}`);
-    const subtitleRes = await fetch(subtitleUrl, { signal: AbortSignal.timeout(8000) });
-    if (!subtitleRes.ok) {
-      throw new Error('No subtitles transcript found or failed to fetch transcript.');
-    }
-
-    const xml = await subtitleRes.text();
+    // Fetch transcript using library
+    const transcriptItems = await YoutubeTranscript.fetchTranscript(videoId);
     
-    // Parse Simple XML to SRT
-    const textRegex = /<text\s+start="([\d.]+)"\s+dur="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g;
-    let index = 1;
+    if (!transcriptItems || transcriptItems.length === 0) {
+      throw new Error('Subtitles are empty or could not be retrieved.');
+    }
+
+    // Convert to standard SRT
     let srt = '';
-    let match;
-
-    while ((match = textRegex.exec(xml)) !== null) {
-      const startSecs = parseFloat(match[1]);
-      const durSecs = parseFloat(match[2]);
+    transcriptItems.forEach((item, index) => {
+      const startSecs = item.offset / 1000;
+      const durSecs = item.duration / 1000;
       const endSecs = startSecs + durSecs;
 
       const startSrt = formatSrtTime(startSecs);
       const endSrt = formatSrtTime(endSecs);
 
-      let text = match[3]
+      // Clean up text format
+      let text = item.text
         .replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
         .replace(/&quot;/g, '"')
         .replace(/&#39;/g, "'")
         .replace(/&apos;/g, "'")
-        .replace(/<[^>]*>/g, '') // Strip internal html styling tags like <b> or <i>
+        .replace(/<[^>]*>/g, '') // Strip html tags
         .trim();
 
       if (text) {
-        srt += `${index}\n${startSrt} --> ${endSrt}\n${text}\n\n`;
-        index++;
+        srt += `${index + 1}\n${startSrt} --> ${endSrt}\n${text}\n\n`;
       }
-    }
+    });
 
     if (!srt) {
-      throw new Error('Subtitles are empty or could not be parsed.');
+      throw new Error('Subtitles parsing yielded an empty result.');
     }
 
-    // Log success
-    try {
-      await ApiUsageLog.create({
-        ip,
-        action: 'download-subtitles',
-        url: url,
-        platform: 'youtube',
-        apiUsed: 'YouTube Scraper',
-        status: 'success'
-      });
-    } catch (logErr) {}
+    // Log success in DB if connected
+    if (mongoose.connection.readyState === 1) {
+      try {
+        await ApiUsageLog.create({
+          ip,
+          action: 'download-subtitles',
+          url: url,
+          platform: 'youtube',
+          apiUsed: 'YouTube Transcript Library',
+          status: 'success'
+        });
+      } catch (logErr) {}
+    }
 
     // Return SRT
     return NextResponse.json({
       success: true,
       srt,
       videoId,
-      title: ytData?.videoDetails?.title || 'youtube_subtitles'
+      title: 'YouTube Subtitles'
     });
 
   } catch (error: any) {
     console.error('Subtitles extraction failed:', error.message);
-    try {
-      await ApiUsageLog.create({
-        ip,
-        action: 'download-subtitles',
-        url: url,
-        platform: 'youtube',
-        apiUsed: 'YouTube Scraper',
-        status: 'failed',
-        errorMessage: error.message
-      });
-    } catch (logErr) {}
+    
+    // Log failure in DB if connected
+    if (mongoose.connection.readyState === 1) {
+      try {
+        await ApiUsageLog.create({
+          ip,
+          action: 'download-subtitles',
+          url: url,
+          platform: 'youtube',
+          apiUsed: 'YouTube Transcript Library',
+          status: 'failed',
+          errorMessage: error.message
+        });
+      } catch (logErr) {}
+    }
 
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

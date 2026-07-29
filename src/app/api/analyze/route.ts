@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import * as cheerio from 'cheerio';
 import dns from 'dns';
 import tls from 'tls';
@@ -1040,16 +1041,20 @@ export async function POST(request: NextRequest) {
           if (process.env.GEMINI_API_KEY) apis.push('Gemini');
         }
       }
-      await ApiUsageLog.create({
-        ip,
-        action: `analyze-${scanType}`,
-        url: rawUrl || 'Unknown URL',
-        platform: data.platform || 'website',
-        apiUsed: apis.join(', '),
-        status: isSuccess ? 'success' : 'failed',
-        errorMessage: isSuccess ? undefined : (data.error || 'Unknown error'),
-        userEmail: currentUserEmail
-      });
+      if (mongoose.connection.readyState === 1) {
+        await ApiUsageLog.create({
+          ip,
+          action: `analyze-${scanType}`,
+          url: rawUrl || 'Unknown URL',
+          platform: data.platform || 'website',
+          apiUsed: apis.join(', '),
+          status: isSuccess ? 'success' : 'failed',
+          errorMessage: isSuccess ? undefined : (data.error || 'Unknown error'),
+          userEmail: currentUserEmail
+        });
+      } else {
+        console.warn('MongoDB not connected, skipping log entry creation.');
+      }
     } catch (logErr) {
       console.error('MongoDB Logging failed:', logErr);
     }
@@ -1065,16 +1070,20 @@ export async function POST(request: NextRequest) {
     if ((scanType === 'base' || !scanType) && !currentUserEmail) {
       const startOf24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
       try {
-        const count = await ApiUsageLog.countDocuments({
-          ip,
-          action: 'analyze-base',
-          timestamp: { $gte: startOf24h }
-        });
-        if (count >= 10) {
-          return await sendResponse({
-            success: false,
-            error: 'Daily limit of 10 link detections reached. Please register/log in to unlock unlimited scans.'
-          }, 429);
+        if (mongoose.connection.readyState === 1) {
+          const count = await ApiUsageLog.countDocuments({
+            ip,
+            action: 'analyze-base',
+            timestamp: { $gte: startOf24h }
+          });
+          if (count >= 10) {
+            return await sendResponse({
+              success: false,
+              error: 'Daily limit of 10 link detections reached. Please register/log in to unlock unlimited scans.'
+            }, 429);
+          }
+        } else {
+          console.warn('MongoDB not connected, skipping rate limit check.');
         }
       } catch (limitErr) {
         console.error('Rate limit query failed:', limitErr);

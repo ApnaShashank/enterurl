@@ -187,7 +187,7 @@ const LighthouseScoreCircle = ({ score, label }: { score: number; label: string 
   const strokeDashoffset = circumference - (score / 100) * circumference;
 
   return (
-    <div className="flex flex-col items-center gap-2 p-3 rounded-2xl flex-1 min-w-[100px] bg-white border border-zinc-100">
+    <div className="flex flex-col items-center gap-2 p-3 rounded-2xl flex-1 min-w-25 bg-white border border-zinc-100">
       <div className="relative w-16 h-16">
         <svg className="w-full h-full -rotate-90">
           <circle 
@@ -706,6 +706,7 @@ export default function Home() {
   const [videoAspectRatio, setVideoAspectRatio] = useState<'landscape' | 'portrait'>('landscape');
   const [isAutoCaptioning, setIsAutoCaptioning] = useState(false);
   const [autoCaptionError, setAutoCaptionError] = useState<string | null>(null);
+  const [autoCaptionStep, setAutoCaptionStep] = useState(0); // 0=idle, 1=extracting audio, 2=transcribing, 3=syncing
   const editorRef = useRef<HTMLDivElement>(null);
 
   // States for creating/adding new overlays
@@ -913,6 +914,7 @@ export default function Home() {
     if (!result || !result.url) return;
     setIsAutoCaptioning(true);
     setAutoCaptionError(null);
+    setAutoCaptionStep(1); // Step 1: Extracting audio / checking subtitles
     try {
       let srtData = null;
       try {
@@ -928,12 +930,15 @@ export default function Home() {
       }
 
       if (srtData) {
+        setAutoCaptionStep(3); // Step 3: Syncing
         const parsed = parseSrt(srtData);
         setEditorSubtitles(parsed);
         setIsAutoCaptioning(false);
+        setAutoCaptionStep(0);
         return;
       }
 
+      setAutoCaptionStep(2); // Step 2: Running AI transcript
       const mediaUrl = editorVideoUrl || result.mediaUrls?.[0] || result.url;
       const submitRes = await fetch('/api/transcribe', {
         method: 'POST',
@@ -947,18 +952,26 @@ export default function Home() {
         setAuthModalMode(currentUser ? 'login' : 'signup');
         setIsAuthModalOpen(true);
         setIsAutoCaptioning(false);
+        setAutoCaptionStep(0);
         return;
       }
 
       const submitData = await submitRes.json();
       if (!submitData.success) {
-        throw new Error(submitData.error || 'Failed to start transcription');
+        const errMsg = submitData.error || 'Failed to start transcription';
+        // Better error message for audio extraction failure
+        if (errMsg.includes('Failed to extract audio')) {
+          throw new Error('Could not extract audio from this video. Try a different video, or paste a direct .mp4/.mp3 link.');
+        }
+        throw new Error(errMsg);
       }
 
       if (submitData.status === 'completed' && submitData.words) {
+        setAutoCaptionStep(3); // Step 3: Syncing captions
         const parsed = buildSubtitlesFromWords(submitData.words);
         setEditorSubtitles(parsed);
         setIsAutoCaptioning(false);
+        setAutoCaptionStep(0);
         return;
       }
 
@@ -975,26 +988,31 @@ export default function Home() {
           if (!pollData.success) {
             clearInterval(interval);
             setIsAutoCaptioning(false);
+            setAutoCaptionStep(0);
             setAutoCaptionError(pollData.error || 'Transcription failed');
             return;
           }
 
           if (pollData.status === 'completed') {
             clearInterval(interval);
-            setIsAutoCaptioning(false);
+            setAutoCaptionStep(3); // Step 3: Syncing
             if (pollData.words) {
               const parsed = buildSubtitlesFromWords(pollData.words);
               setEditorSubtitles(parsed);
             } else {
               setAutoCaptionError('No words found in transcript.');
             }
+            setIsAutoCaptioning(false);
+            setAutoCaptionStep(0);
           } else if (pollData.status === 'error') {
             clearInterval(interval);
             setIsAutoCaptioning(false);
+            setAutoCaptionStep(0);
             setAutoCaptionError(pollData.error || 'Transcription processing error');
           } else if (attempts > 100) {
             clearInterval(interval);
             setIsAutoCaptioning(false);
+            setAutoCaptionStep(0);
             setAutoCaptionError('Transcription timed out. Please try again.');
           }
         } catch (pollErr: any) {
@@ -1006,6 +1024,7 @@ export default function Home() {
       console.error(err);
       setAutoCaptionError(err.message || 'Auto-caption generation failed.');
       setIsAutoCaptioning(false);
+      setAutoCaptionStep(0);
     }
   };
 
@@ -2273,10 +2292,10 @@ export default function Home() {
               onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
               className="flex items-center gap-2 p-1 bg-white border border-zinc-200 hover:border-zinc-300 rounded-full hover:bg-zinc-50/50 transition-all shadow-sm active:scale-98 cursor-pointer select-none"
             >
-              <div className="h-7 w-7 rounded-full bg-gradient-to-tr from-violet-600 to-pink-500 flex items-center justify-center text-white font-extrabold text-[11px] shadow-sm select-none border border-white/20">
+              <div className="h-7 w-7 rounded-full bg-linear-to-tr from-violet-600 to-pink-500 flex items-center justify-center text-white font-extrabold text-[11px] shadow-sm select-none border border-white/20">
                 {displayInitial}
               </div>
-              <span className="hidden sm:inline-block font-sans text-xs font-semibold text-zinc-700 max-w-[120px] truncate select-none pl-1">
+              <span className="hidden sm:inline-block font-sans text-xs font-semibold text-zinc-700 max-w-30 truncate select-none pl-1">
                 {displayHandle}
               </span>
               <ChevronDown size={12} className={`text-zinc-400 mr-2 transition-transform duration-300 ${isProfileMenuOpen ? 'rotate-180' : ''}`} />
@@ -2287,7 +2306,7 @@ export default function Home() {
               <div className="absolute right-0 mt-2.5 w-64 bg-white border border-zinc-200/80 rounded-2xl p-4 shadow-xl select-text animate-scale-up-in">
                 {/* Header info */}
                 <div className="flex items-center gap-3 select-none mb-3">
-                  <div className="h-9 w-9 rounded-full bg-gradient-to-tr from-violet-600 to-pink-500 flex items-center justify-center text-white font-black text-xs shadow-sm">
+                  <div className="h-9 w-9 rounded-full bg-linear-to-tr from-violet-600 to-pink-500 flex items-center justify-center text-white font-black text-xs shadow-sm">
                     {displayInitial}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -2585,7 +2604,7 @@ export default function Home() {
                     value={feedbackText}
                     onChange={(e) => setFeedbackText(e.target.value)}
                     placeholder="Describe what you were trying to do or add custom notes..."
-                    className="w-full min-h-[60px] p-2.5 text-xs bg-white border border-red-250 rounded-xl text-zinc-800 focus:outline-none focus:ring-1 focus:ring-red-400 placeholder:text-zinc-400 font-light"
+                    className="w-full min-h-15 p-2.5 text-xs bg-white border border-red-250 rounded-xl text-zinc-800 focus:outline-none focus:ring-1 focus:ring-red-400 placeholder:text-zinc-400 font-light"
                   />
                   <div className="flex gap-2">
                     <button
@@ -2637,7 +2656,7 @@ export default function Home() {
                         <video 
                           src={result.mediaUrls[0]} 
                           controls 
-                          className="w-full max-h-[360px] object-contain"
+                          className="w-full max-h-90 object-contain"
                           poster={result.previewUrl}
                         />
                       </div>
@@ -2693,7 +2712,7 @@ export default function Home() {
                           <div className="flex gap-2 w-full">
                             <button
                               onClick={() => handleRealVideoDownload(result.url, 'video', result.title, selectedVideoQuality)}
-                              className="flex-grow py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+                              className="grow py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
                             >
                               <Download size={15} />
                               <span>Download Full Video</span>
@@ -2766,21 +2785,21 @@ export default function Home() {
                 {activeAsset === 'image' && (
                   <div className="space-y-4 animate-slide-up-in">
                     {result.previewUrl ? (
-                      <div className="relative w-full rounded-xl overflow-hidden bg-zinc-50 border border-zinc-100/80 flex justify-center items-center max-h-[380px] p-2">
+                      <div className="relative w-full rounded-xl overflow-hidden bg-zinc-50 border border-zinc-100/80 flex justify-center items-center max-h-95 p-2">
                         <img 
                           src={result.previewUrl} 
                           alt={result.title || 'Scraped Preview'}
-                          className="rounded-lg object-contain max-h-[360px] shadow-sm select-none"
+                          className="rounded-lg object-contain max-h-90 shadow-sm select-none"
                         />
                       </div>
                     ) : result.platform === 'instagram' ? (
                       /* Mocked image preview card for Instagram post */
-                      <div className="relative w-full rounded-xl overflow-hidden bg-zinc-50 border border-zinc-100/80 flex flex-col justify-center items-center h-[260px] p-4 text-center">
+                      <div className="relative w-full rounded-xl overflow-hidden bg-zinc-50 border border-zinc-100/80 flex flex-col justify-center items-center h-65 p-4 text-center">
                         <div className="w-12 h-12 rounded-full bg-pink-50 border border-pink-100 flex items-center justify-center text-pink-500 mb-2">
                           <ImageIcon size={22} />
                         </div>
                         <h4 className="text-xs font-semibold text-zinc-800">Instagram Post Image</h4>
-                        <p className="text-[10px] text-zinc-400 font-light mt-1 max-w-[200px]">
+                        <p className="text-[10px] text-zinc-400 font-light mt-1 max-w-50">
                           Preview frame restricted by Instagram. You can still download the image asset below.
                         </p>
                       </div>
@@ -2873,16 +2892,16 @@ export default function Home() {
                               <video 
                                 src={result.mediaUrls[0]} 
                                 controls 
-                                className="w-full max-h-[360px] object-contain"
+                                className="w-full max-h-90 object-contain"
                                 poster={result.previewUrl}
                               />
                             </div>
                           ) : result.previewUrl ? (
-                            <div className="relative w-full rounded-xl overflow-hidden bg-zinc-50 border border-zinc-100/80 flex justify-center items-center max-h-[380px] p-2">
+                            <div className="relative w-full rounded-xl overflow-hidden bg-zinc-50 border border-zinc-100/80 flex justify-center items-center max-h-95 p-2">
                               <img 
                                 src={result.previewUrl} 
                                 alt={result.title}
-                                className="w-full h-auto max-h-[360px] object-contain rounded-lg"
+                                className="w-full h-auto max-h-90 object-contain rounded-lg"
                               />
                             </div>
                           ) : (
@@ -2948,7 +2967,7 @@ export default function Home() {
                                   );
                                 }
                               }}
-                              className="flex-grow py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+                              className="grow py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
                             >
                               <Download size={15} />
                               <span>Download Audio file</span>
@@ -2984,7 +3003,7 @@ export default function Home() {
                             <button
                               onClick={() => handleTranscribe(result.mediaUrls?.[0] || result.url)}
                               disabled={isTranscribing}
-                              className="w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-60 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-md"
+                              className="w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-60 bg-linear-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-md"
                             >
                               {isTranscribing ? (
                                 <>
@@ -3015,9 +3034,9 @@ export default function Home() {
                                 </div>
                                 
                                 {!transcriptionWords ? (
-                                  <p className="text-xs text-zinc-750 leading-relaxed select-text max-h-[200px] overflow-y-auto">{transcriptionText}</p>
+                                  <p className="text-xs text-zinc-750 leading-relaxed select-text max-h-50 overflow-y-auto">{transcriptionText}</p>
                                 ) : (
-                                  <div className="text-xs leading-relaxed select-text max-h-[200px] overflow-y-auto mt-1 font-sans">
+                                  <div className="text-xs leading-relaxed select-text max-h-50 overflow-y-auto mt-1 font-sans">
                                     <div className="flex flex-wrap gap-x-1 gap-y-1">
                                       {transcriptionWords.map((wordObj: any, i: number) => {
                                         const isCurrent = audioCurrentTime >= wordObj.start && audioCurrentTime <= wordObj.end;
@@ -3069,7 +3088,7 @@ export default function Home() {
                                       value={feedbackText}
                                       onChange={(e) => setFeedbackText(e.target.value)}
                                       placeholder="Comment on what happened..."
-                                      className="w-full min-h-[50px] p-2 text-[11px] bg-white border border-rose-200 rounded-lg text-zinc-800 focus:outline-none focus:ring-1 focus:ring-rose-450 placeholder:text-zinc-400 font-light"
+                                      className="w-full min-h-12.5 p-2 text-[11px] bg-white border border-rose-200 rounded-lg text-zinc-800 focus:outline-none focus:ring-1 focus:ring-rose-450 placeholder:text-zinc-400 font-light"
                                     />
                                     <div className="flex gap-1.5">
                                       <button
@@ -3109,7 +3128,7 @@ export default function Home() {
                 {activeAsset === 'website' && (
                   <div className="space-y-4 animate-slide-up-in">
                     {result.locationData ? (
-                      <div className="relative w-full rounded-xl overflow-hidden border border-zinc-100 bg-zinc-50 h-[260px] p-1">
+                      <div className="relative w-full rounded-xl overflow-hidden border border-zinc-100 bg-zinc-50 h-65 p-1">
                         <iframe
                           title="Location Map"
                           src={result.locationData.embedUrl}
@@ -3119,11 +3138,11 @@ export default function Home() {
                         ></iframe>
                       </div>
                     ) : result.previewUrl ? (
-                      <div className="relative w-full rounded-xl overflow-hidden bg-zinc-50 border border-zinc-100 flex justify-center items-center max-h-[260px] p-1">
+                      <div className="relative w-full rounded-xl overflow-hidden bg-zinc-50 border border-zinc-100 flex justify-center items-center max-h-65 p-1">
                         <img 
                           src={result.previewUrl} 
                           alt="Web page layout banner"
-                          className="rounded-lg object-cover w-full h-[220px]"
+                          className="rounded-lg object-cover w-full h-55"
                         />
                       </div>
                     ) : (
@@ -3184,7 +3203,7 @@ export default function Home() {
                         {result.productData.priceHistory && result.productData.priceHistory.length > 0 ? (
                           <div className="space-y-1.5">
                             <span className="text-[9px] text-zinc-400 uppercase font-bold tracking-wider block">Price Timeline (Date & Time)</span>
-                            <div className="max-h-[140px] overflow-y-auto space-y-1 pr-1 scrollbar-thin">
+                            <div className="max-h-35 overflow-y-auto space-y-1 pr-1 scrollbar-thin">
                               {result.productData.priceHistory.slice().reverse().map((point, index) => {
                                 const dateStr = new Date(point.timestamp).toLocaleString(undefined, {
                                   dateStyle: 'medium',
@@ -3272,7 +3291,7 @@ export default function Home() {
                     {/* EXIF Viewer */}
                     <div>
                       <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block mb-2">EXIF Metadata details</span>
-                      <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-100 font-mono text-[10px] text-zinc-500 overflow-y-auto max-h-[140px] space-y-1">
+                      <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-100 font-mono text-[10px] text-zinc-500 overflow-y-auto max-h-35 space-y-1">
                         {exifData ? (
                           exifData.message ? (
                             <span className="text-zinc-400 italic block">{exifData.message}</span>
@@ -3280,7 +3299,7 @@ export default function Home() {
                             Object.entries(exifData).map(([key, val]: any) => (
                               <div key={key} className="flex justify-between border-b border-zinc-200/30 pb-0.5">
                                 <span className="text-zinc-400 font-semibold">{key}</span>
-                                <span className="text-zinc-600 font-medium truncate max-w-[240px]">
+                                <span className="text-zinc-600 font-medium truncate max-w-60">
                                   {typeof val === 'object' ? JSON.stringify(val) : String(val)}
                                 </span>
                               </div>
@@ -3345,7 +3364,7 @@ export default function Home() {
                           <button
                             onClick={() => handleRemoveBg(result.previewUrl!)}
                             disabled={isRemovingBg}
-                            className="w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-md"
+                            className="w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed bg-linear-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-md"
                           >
                             {isRemovingBg ? (
                                 <>
@@ -3362,7 +3381,7 @@ export default function Home() {
                         ) : (
                           <div className="space-y-2">
                             <div className="relative rounded-xl overflow-hidden bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiI+PHJlY3Qgd2lkdGg9IjgiIGhlaWdodD0iOCIgZmlsbD0iI2QxZDVkYiIvPjxyZWN0IHg9IjgiIHk9IjgiIHdpZHRoPSI4IiBoZWlnaHQ9IjgiIGZpbGw9IiNkMWQ1ZGIiLz48L3N2Zz4=')]">
-                              <img src={removedBgImageUrl} alt="Background removed" className="w-full rounded-xl object-contain max-h-[220px]" />
+                              <img src={removedBgImageUrl} alt="Background removed" className="w-full rounded-xl object-contain max-h-55" />
                             </div>
                             <div className="flex gap-2">
                               <a
@@ -3406,7 +3425,7 @@ export default function Home() {
                                     value={feedbackText}
                                     onChange={(e) => setFeedbackText(e.target.value)}
                                     placeholder="Comment on what happened..."
-                                    className="w-full min-h-[50px] p-2 text-[11px] bg-white border border-rose-200 rounded-lg text-zinc-800 focus:outline-none focus:ring-1 focus:ring-rose-455 placeholder:text-zinc-400 font-light"
+                                    className="w-full min-h-12.5 p-2 text-[11px] bg-white border border-rose-200 rounded-lg text-zinc-800 focus:outline-none focus:ring-1 focus:ring-rose-455 placeholder:text-zinc-400 font-light"
                                   />
                                   <div className="flex gap-1.5">
                                     <button
@@ -3486,7 +3505,7 @@ export default function Home() {
                                 </button>
                               </div>
                             </div>
-                            <p className="text-xs text-[#1c1c1e] leading-relaxed max-h-[140px] overflow-y-auto select-text font-mono bg-white p-2.5 rounded-lg border border-zinc-100/80">{ocrText}</p>
+                            <p className="text-xs text-[#1c1c1e] leading-relaxed max-h-35 overflow-y-auto select-text font-mono bg-white p-2.5 rounded-lg border border-zinc-100/80">{ocrText}</p>
                           </div>
                         )}
                       </div>
@@ -3599,8 +3618,8 @@ export default function Home() {
                     ) : screenshotData[screenshotDevice] ? (
                       <div className="flex flex-col items-center gap-3">
                         <div className={`w-full border border-zinc-200/80 rounded-xl overflow-hidden bg-zinc-50 shadow-lg mx-auto transition-all duration-300 ${
-                          screenshotDevice === 'mobile' ? 'max-w-[280px] aspect-[9/16]' :
-                          screenshotDevice === 'tablet' ? 'max-w-[500px] aspect-[4/3]' : 'w-full aspect-video'
+                          screenshotDevice === 'mobile' ? 'max-w-70 aspect-9/16' :
+                          screenshotDevice === 'tablet' ? 'max-w-125 aspect-4/3' : 'w-full aspect-video'
                         }`}>
                           {screenshotDevice !== 'mobile' && (
                             <div className="bg-zinc-100 border-b border-zinc-200 px-3 py-2 flex items-center gap-2 shrink-0 select-none">
@@ -4021,7 +4040,7 @@ export default function Home() {
                     {result.developerSpecs.designTokens && result.developerSpecs.designTokens.length > 0 && (
                       <div className="space-y-2">
                         <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block">CSS Design Tokens ({result.developerSpecs.designTokens.length})</span>
-                        <div className="bg-zinc-50 border border-zinc-150 rounded-xl p-3 max-h-[220px] overflow-y-auto font-mono text-[10px] space-y-1.5">
+                        <div className="bg-zinc-50 border border-zinc-150 rounded-xl p-3 max-h-55 overflow-y-auto font-mono text-[10px] space-y-1.5">
                           {result.developerSpecs.designTokens.map((token, idx) => (
                             <div 
                               key={idx} 
@@ -4081,7 +4100,7 @@ export default function Home() {
                               </button>
                               
                               {!collapsedSections.images && (
-                                <div className="p-3 max-h-[280px] overflow-y-auto">
+                                <div className="p-3 max-h-70 overflow-y-auto">
                                   {filtered.length === 0 ? (
                                     <div className="py-4 text-center text-zinc-400 text-xs font-light">No image assets match search</div>
                                   ) : (
@@ -4089,7 +4108,7 @@ export default function Home() {
                                       {filtered.map((url, i) => (
                                         <div key={i} className="group relative border border-zinc-200/60 rounded-lg overflow-hidden bg-zinc-50/50 aspect-video flex flex-col justify-between p-1.5 shadow-sm">
                                           <img src={url} className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt="Asset" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-                                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-1.5">
+                                          <div className="absolute inset-0 bg-linear-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-1.5">
                                             <span className="text-[8px] text-white font-mono truncate mb-1">{url.split('/').pop()}</span>
                                             <div className="flex gap-1">
                                               <button
@@ -4143,7 +4162,7 @@ export default function Home() {
                               </button>
                               
                               {!collapsedSections.favicons && (
-                                <div className="p-3 max-h-[220px] overflow-y-auto space-y-2">
+                                <div className="p-3 max-h-55 overflow-y-auto space-y-2">
                                   {filtered.length === 0 ? (
                                     <div className="py-4 text-center text-zinc-400 text-xs font-light">No icons match search</div>
                                   ) : (
@@ -4202,7 +4221,7 @@ export default function Home() {
                               </button>
                               
                               {!collapsedSections.stylesheets && (
-                                <div className="p-3 max-h-[220px] overflow-y-auto space-y-1.5 divide-y divide-zinc-200/20">
+                                <div className="p-3 max-h-55 overflow-y-auto space-y-1.5 divide-y divide-zinc-200/20">
                                   {filtered.length === 0 ? (
                                     <div className="py-4 text-center text-zinc-400 text-xs font-light">No stylesheets match search</div>
                                   ) : (
@@ -4257,7 +4276,7 @@ export default function Home() {
                               </button>
                               
                               {!collapsedSections.scripts && (
-                                <div className="p-3 max-h-[220px] overflow-y-auto space-y-1.5 divide-y divide-zinc-200/20">
+                                <div className="p-3 max-h-55 overflow-y-auto space-y-1.5 divide-y divide-zinc-200/20">
                                   {filtered.length === 0 ? (
                                     <div className="py-4 text-center text-zinc-400 text-xs font-light">No script files match search</div>
                                   ) : (
@@ -4312,7 +4331,7 @@ export default function Home() {
                               </button>
                               
                               {!collapsedSections.media && (
-                                <div className="p-3 max-h-[220px] overflow-y-auto space-y-1.5 divide-y divide-zinc-200/20">
+                                <div className="p-3 max-h-55 overflow-y-auto space-y-1.5 divide-y divide-zinc-200/20">
                                   {filtered.length === 0 ? (
                                     <div className="py-4 text-center text-zinc-400 text-xs font-light">No media assets match search</div>
                                   ) : (
@@ -4427,13 +4446,13 @@ export default function Home() {
                           ].map(row => (
                             <div key={row.label} className="flex justify-between border-b border-zinc-200/40 pb-1">
                               <span className="text-zinc-400 font-bold">{row.label}</span>
-                              <span className="text-zinc-700 font-medium max-w-[200px] truncate text-right">{row.value || '—'}</span>
+                              <span className="text-zinc-700 font-medium max-w-50 truncate text-right">{row.value || '—'}</span>
                             </div>
                           ))}
                           {result.linkIntel.whois.nameServers.length > 0 && (
                             <div className="flex justify-between pt-0.5">
                               <span className="text-zinc-400 font-bold">Name Servers</span>
-                              <span className="text-zinc-700 font-medium text-right max-w-[200px] truncate">{result.linkIntel.whois.nameServers.slice(0, 2).join(', ')}</span>
+                              <span className="text-zinc-700 font-medium text-right max-w-50 truncate">{result.linkIntel.whois.nameServers.slice(0, 2).join(', ')}</span>
                             </div>
                           )}
                         </div>
@@ -4490,7 +4509,7 @@ export default function Home() {
                           {result.linkIntel.dnsRecords.map((rec, i) => (
                             <div key={i} className="flex justify-between border-t border-zinc-200/40 pt-1 mt-1">
                               <span className="text-zinc-400">{rec.type}</span>
-                              <span className="font-semibold max-w-[160px] truncate">{rec.records.join(', ')}</span>
+                              <span className="font-semibold max-w-40 truncate">{rec.records.join(', ')}</span>
                             </div>
                           ))}
                         </div>
@@ -4508,7 +4527,7 @@ export default function Home() {
                           {result.linkIntel.dnsRecords.map((rec, i) => (
                             <div key={i} className={`flex justify-between ${i > 0 ? 'border-t border-zinc-200/40 pt-1 mt-1' : ''}`}>
                               <span className="text-zinc-400 font-bold shrink-0 mr-2">{rec.type}</span>
-                              <span className="font-semibold max-w-[220px] truncate text-right">{rec.records.join(', ')}</span>
+                              <span className="font-semibold max-w-55 truncate text-right">{rec.records.join(', ')}</span>
                             </div>
                           ))}
                         </div>
@@ -4544,7 +4563,7 @@ export default function Home() {
                           ].map(row => (
                             <div key={row.label} className="flex justify-between border-b border-zinc-200/30 pb-1">
                               <span className="text-zinc-400 font-bold">{row.label}</span>
-                              <span className="text-zinc-700 font-medium max-w-[200px] truncate text-right">{row.value}</span>
+                              <span className="text-zinc-700 font-medium max-w-50 truncate text-right">{row.value}</span>
                             </div>
                           ))}
                         </div>
@@ -4636,11 +4655,11 @@ export default function Home() {
                         {result.linkIntel.headers && Object.keys(result.linkIntel.headers).length > 0 && (
                           <div className="flex-1">
                             <span className="text-[10px] tracking-wider text-zinc-400 font-semibold uppercase block mb-1.5">Server Headers</span>
-                            <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-100 font-mono text-[9px] text-zinc-500 overflow-y-auto max-h-[100px] space-y-1">
+                            <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-100 font-mono text-[9px] text-zinc-500 overflow-y-auto max-h-25 space-y-1">
                               {Object.entries(result.linkIntel.headers).map(([k, v]) => (
                                 <div key={k} className="flex justify-between border-b border-zinc-150 pb-0.5">
                                   <span className="text-zinc-400 font-bold shrink-0 mr-2">{k}</span>
-                                  <span className="text-zinc-600 truncate max-w-[160px]" title={v}>{v}</span>
+                                  <span className="text-zinc-600 truncate max-w-40" title={v}>{v}</span>
                                 </div>
                               ))}
                             </div>
@@ -4862,43 +4881,62 @@ export default function Home() {
 
         {/* INLINE PREMIUM CAPTION EDITOR */}
         {isEditorOpen && (
-          <div 
-            ref={editorRef} 
-            className="w-full mt-10 bg-zinc-950 border border-zinc-900 rounded-3xl p-6 lg:p-8 flex flex-col font-sans text-white antialiased shadow-2xl scroll-mt-24 animate-slide-up-in select-text"
+          <div
+            ref={editorRef}
+            className="w-full mt-8 bg-white border border-zinc-200 rounded-3xl overflow-hidden shadow-xl scroll-mt-24 animate-slide-up-in font-sans antialiased"
           >
             {/* Editor Header */}
-            <div className="pb-5 border-b border-zinc-900 flex items-center justify-between mb-6 select-none">
-              <div className="flex items-center gap-2">
-                <Sparkles className="text-violet-500 animate-pulse" size={20} />
-                <h2 className="text-sm md:text-base font-black tracking-widest uppercase text-zinc-100">Premium Caption Editor</h2>
+            <div className="px-6 py-4 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/80 select-none">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-xl bg-zinc-900 flex items-center justify-center shadow-sm">
+                  <Sparkles size={14} className="text-white" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-zinc-900 tracking-tight leading-none mb-0.5">Caption Studio</h2>
+                  <p className="text-[10px] text-zinc-400 font-medium">AI-powered caption editor with live video preview</p>
+                </div>
               </div>
-              <button 
+              <button
                 onClick={() => {
                   setIsEditorOpen(false);
                   setEditorSubtitles([]);
+                  setAutoCaptionError(null);
+                  setAutoCaptionStep(0);
                 }}
-                className="px-4 py-2 bg-zinc-905 hover:bg-zinc-900 rounded-xl text-xs font-semibold tracking-wider uppercase transition-all cursor-pointer border border-zinc-800/80 hover:text-white"
+                className="flex items-center gap-1.5 px-4 py-2 bg-zinc-100 hover:bg-zinc-200 rounded-xl text-xs font-semibold text-zinc-600 hover:text-zinc-800 transition-all cursor-pointer border border-zinc-200/60 select-none"
               >
-                Exit Editor
+                <XCircle size={13} />
+                Close Editor
               </button>
             </div>
 
             {/* Editor Workspace */}
             {isResolvingVideo ? (
-              <div className="py-20 flex flex-col items-center justify-center space-y-4 select-none">
-                <LoaderTripleArcs size={60} className="text-violet-500" />
-                <p className="text-zinc-400 text-sm font-medium tracking-wide animate-pulse">Resolving high-speed video stream...</p>
+              /* SKELETON LOADING for video resolving */
+              <div className="p-6 flex flex-col lg:flex-row gap-6 animate-pulse select-none">
+                {/* Left: video skeleton */}
+                <div className="lg:w-3/5 flex flex-col gap-4">
+                  <div className="w-full aspect-video bg-zinc-100 rounded-2xl"></div>
+                  <div className="h-12 bg-zinc-100 rounded-xl w-full"></div>
+                </div>
+                {/* Right: sidebar skeleton */}
+                <div className="lg:w-2/5 flex flex-col gap-4">
+                  <div className="h-28 bg-zinc-100 rounded-2xl"></div>
+                  <div className="h-40 bg-zinc-100 rounded-2xl"></div>
+                  <div className="h-52 bg-zinc-100 rounded-2xl"></div>
+                </div>
               </div>
             ) : (
-              <div className="flex flex-col lg:flex-row gap-6">
-                {/* Left Side: Video Player Container */}
-                <div className="lg:w-3/5 flex flex-col justify-center items-center bg-black/40 border border-zinc-900/60 p-6 rounded-2xl">
-                  <div 
-                    className={`relative w-full rounded-2xl overflow-hidden bg-black border border-zinc-850 shadow-2xl flex items-center justify-center transition-all duration-300 ${
-                      videoAspectRatio === 'portrait' ? 'max-w-[280px] aspect-[9/16] my-4' : 'max-w-2xl aspect-video'
+              <div className="flex flex-col lg:flex-row divide-y lg:divide-y-0 lg:divide-x divide-zinc-100">
+
+                {/* ── LEFT: Video Player + metadata strip ── */}
+                <div className="lg:w-3/5 flex flex-col p-6 gap-4">
+                  {/* Video Player */}
+                  <div
+                    className={`relative w-full rounded-2xl overflow-hidden bg-zinc-900 flex items-center justify-center shadow-lg border border-zinc-800/30 ${
+                      videoAspectRatio === 'portrait' ? 'max-w-65 mx-auto aspect-9/16' : 'aspect-video'
                     }`}
                   >
-                    {/* HTML5 Video Player */}
                     {editorVideoUrl ? (
                       <video
                         src={editorVideoUrl}
@@ -4906,16 +4944,15 @@ export default function Home() {
                         className="w-full h-full object-contain"
                         onLoadedMetadata={(e) => {
                           const video = e.currentTarget;
-                          if (video.videoHeight > video.videoWidth) {
-                            setVideoAspectRatio('portrait');
-                          } else {
-                            setVideoAspectRatio('landscape');
-                          }
+                          setVideoAspectRatio(video.videoHeight > video.videoWidth ? 'portrait' : 'landscape');
                         }}
                         onTimeUpdate={(e) => setEditorCurrentTime(e.currentTarget.currentTime)}
                       />
                     ) : (
-                      <p className="text-zinc-500 text-xs font-light">Loading video canvas...</p>
+                      <div className="flex flex-col items-center justify-center gap-2 py-10 text-zinc-400 select-none">
+                        <VideoIcon size={32} className="opacity-40" />
+                        <p className="text-xs font-medium">Preparing video stream...</p>
+                      </div>
                     )}
 
                     {/* SYNCED CAPTION OVERLAY */}
@@ -4926,12 +4963,10 @@ export default function Home() {
                       if (!activeSub) return null;
                       const preset = CAPTION_PRESETS.find(p => p.id === editorStylePreset) || CAPTION_PRESETS[0];
                       return (
-                        <div 
-                          className="absolute bottom-10 left-6 right-6 flex justify-center text-center pointer-events-none z-10"
-                        >
-                          <span 
+                        <div className="absolute bottom-8 left-4 right-4 flex justify-center text-center pointer-events-none z-10">
+                          <span
                             style={preset.style as React.CSSProperties}
-                            className="px-4 py-2 text-center select-none animate-scale-up-in shadow-lg"
+                            className="px-3 py-1.5 text-center select-none shadow-lg max-w-full leading-snug"
                           >
                             {activeSub.text}
                           </span>
@@ -4939,7 +4974,7 @@ export default function Home() {
                       );
                     })()}
 
-                    {/* CUSTOM WATERMARKS/TEXT OVERLAYS */}
+                    {/* CUSTOM TEXT OVERLAYS */}
                     {editorExtraOverlays.map((overlay) => {
                       const isActive = editorCurrentTime >= overlay.start && editorCurrentTime <= overlay.end;
                       if (!isActive) return null;
@@ -4969,31 +5004,93 @@ export default function Home() {
                       );
                     })}
                   </div>
-                  
-                  <div className="mt-4 text-[10px] text-zinc-500 tracking-wider text-center max-w-md select-none">
-                    Tip: Press play on the video player. Captions and watermarks will display dynamically on screen in sync with the audio track.
+
+                  {/* Below-video metadata strip */}
+                  <div className="flex flex-col sm:flex-row gap-3 p-4 bg-zinc-50 border border-zinc-200/70 rounded-2xl">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="inline-block px-2 py-0.5 bg-zinc-900 text-white text-[9px] font-bold uppercase tracking-wider rounded-md">
+                          {result?.platform || 'Video'}
+                        </span>
+                        {editorSubtitles.length > 0 && (
+                          <span className="inline-block px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-bold uppercase tracking-wider rounded-md">
+                            {editorSubtitles.length} captions synced
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs font-semibold text-zinc-700 truncate leading-snug" title={result?.title || ''}>
+                        {result?.title || 'Video Preview'}
+                      </p>
+                      <p className="text-[10px] text-zinc-400 mt-0.5 select-none">
+                        Press play above — captions sync in real-time with audio
+                      </p>
+                    </div>
+                    <div className="flex gap-2 shrink-0 items-center">
+                      {editorSubtitles.length > 0 && (
+                        <button
+                          onClick={handleDownloadEditorSubtitles}
+                          className="flex items-center gap-1.5 px-3 py-2 bg-white border border-zinc-200 hover:border-zinc-350 text-zinc-700 hover:text-zinc-900 rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-sm"
+                        >
+                          <Download size={12} />
+                          Download SRT
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                {/* Right Side: Configuration Sidebar */}
-                <div className="lg:w-2/5 flex flex-col space-y-6 max-h-[600px] overflow-y-auto pr-2 scrollbar-thin">
-                  
-                  {/* Auto Captions Panel */}
-                  <div className="bg-zinc-900/40 border border-zinc-800/85 p-4.5 rounded-2xl space-y-3">
+                {/* ── RIGHT: Sidebar Controls ── */}
+                <div className="lg:w-2/5 flex flex-col divide-y divide-zinc-100 overflow-y-auto max-h-175">
+
+                  {/* 1) Auto Caption Sync Card */}
+                  <div className="p-5 space-y-3">
                     <div className="flex items-center justify-between select-none">
-                      <span className="text-[10px] tracking-widest text-violet-400 font-bold uppercase flex items-center gap-1">
-                        <Sparkles size={11} />
-                        Auto Captions (AI Voice Sync)
+                      <div className="flex items-center gap-2">
+                        <div className="h-6 w-6 rounded-lg bg-violet-100 flex items-center justify-center">
+                          <Sparkles size={12} className="text-violet-600" />
+                        </div>
+                        <span className="text-xs font-bold text-zinc-800">Auto Caption Sync (AI)</span>
+                      </div>
+                      <span className="text-[9px] bg-violet-50 border border-violet-200 text-violet-700 px-2 py-0.5 rounded-md font-bold uppercase tracking-wide">
+                        Hinglish AI
                       </span>
-                      <span className="text-[8px] bg-violet-950 text-violet-400 px-2 py-0.5 rounded font-mono uppercase font-bold tracking-wide border border-violet-900/40">AI Transcribe</span>
                     </div>
-                    <p className="text-[10px] text-zinc-400 font-light leading-relaxed select-none">
-                      Analyze the audio track to generate styled, voice-synced subtitle segments automatically.
+                    <p className="text-[11px] text-zinc-500 leading-relaxed select-none">
+                      Extracts the full audio and generates timestamped captions in Hindi/English (Hinglish) using AI transcription.
                     </p>
-                    
+
+                    {/* 3-step progress indicator */}
+                    {isAutoCaptioning && (
+                      <div className="flex items-center gap-1.5 select-none">
+                        {[
+                          { n: 1, label: 'Audio' },
+                          { n: 2, label: 'Transcribe' },
+                          { n: 3, label: 'Sync' }
+                        ].map(({ n, label }) => (
+                          <div key={n} className="flex items-center gap-1.5">
+                            <div className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-all ${
+                              autoCaptionStep >= n
+                                ? 'bg-violet-600 text-white'
+                                : 'bg-zinc-100 text-zinc-400'
+                            }`}>
+                              {autoCaptionStep > n ? (
+                                <CheckCircle size={10} />
+                              ) : autoCaptionStep === n ? (
+                                <div className="h-2 w-2 rounded-full bg-white animate-pulse" />
+                              ) : (
+                                <div className="h-2 w-2 rounded-full bg-zinc-300" />
+                              )}
+                              {label}
+                            </div>
+                            {n < 3 && <div className={`h-px w-3 ${autoCaptionStep > n ? 'bg-violet-400' : 'bg-zinc-200'}`}></div>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     {autoCaptionError && (
-                      <div className="p-3 bg-red-955/20 border border-red-900/40 text-red-400 rounded-xl text-[10px] flex items-center gap-1.5 font-light leading-snug">
-                        <AlertCircle size={12} className="shrink-0 text-red-500" />
+                      <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-[11px] flex items-start gap-1.5 leading-snug">
+                        <AlertCircle size={12} className="shrink-0 text-rose-500 mt-0.5" />
                         <span>{autoCaptionError}</span>
                       </div>
                     )}
@@ -5001,38 +5098,49 @@ export default function Home() {
                     <button
                       onClick={handleAutoCaption}
                       disabled={isAutoCaptioning}
-                      className="w-full py-3 bg-violet-650 hover:bg-violet-750 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm border-0"
+                      className="w-full py-3 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-60 text-white font-bold rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm border-0 select-none"
                     >
                       {isAutoCaptioning ? (
                         <>
-                          <LoaderPulsingDots size={10} className="text-white" />
-                          <span>Generating auto-captions...</span>
+                          <div className="h-3.5 w-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>
+                            {autoCaptionStep === 1 ? 'Extracting audio...' :
+                             autoCaptionStep === 2 ? 'Running AI transcript...' :
+                             autoCaptionStep === 3 ? 'Syncing captions...' : 'Processing...'}
+                          </span>
                         </>
                       ) : (
                         <>
-                          <Sparkles size={12} />
-                          <span>Auto Generate Synced Captions</span>
+                          <Sparkles size={13} />
+                          <span>Auto Sync Captions</span>
                         </>
                       )}
                     </button>
                   </div>
 
-                  {/* Style Presets Tab */}
-                  <div className="space-y-3">
-                    <span className="text-[10px] tracking-widest text-violet-400 font-bold uppercase flex items-center gap-1 select-none">
-                      <Sparkles size={11} />
-                      Choose Caption Style (20+ presets)
-                    </span>
-                    <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto scrollbar-thin p-1">
+                  {/* 2) Caption Style Presets */}
+                  <div className="p-5 space-y-3">
+                    <div className="flex items-center gap-2 select-none">
+                      <div className="h-6 w-6 rounded-lg bg-indigo-50 flex items-center justify-center">
+                        <Layers size={12} className="text-indigo-600" />
+                      </div>
+                      <span className="text-xs font-bold text-zinc-800">Caption Style</span>
+                      <span className="text-[10px] text-zinc-400">({CAPTION_PRESETS.length} presets)</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto pr-1">
                       {CAPTION_PRESETS.map((preset) => {
                         const isSel = editorStylePreset === preset.id;
                         return (
                           <button
                             key={preset.id}
                             onClick={() => setEditorStylePreset(preset.id)}
-                            className={`p-2.5 rounded-xl border text-xs font-semibold text-left transition-all truncate cursor-pointer ${isSel ? 'bg-violet-600 border-violet-500 text-white font-bold scale-102' : 'bg-zinc-800 border-zinc-700/60 text-zinc-300 hover:bg-zinc-750'}`}
+                            className={`px-2.5 py-2 rounded-xl border text-xs font-semibold text-left transition-all truncate cursor-pointer select-none ${
+                              isSel
+                                ? 'bg-zinc-900 border-zinc-900 text-white shadow-sm'
+                                : 'bg-white border-zinc-200 text-zinc-600 hover:border-zinc-350 hover:bg-zinc-50'
+                            }`}
                           >
-                            <span style={{ color: preset.style.color, textShadow: preset.style.textShadow ? '1px 1px 1px #000' : 'none' }}>
+                            <span style={isSel ? {} : { color: preset.style.color }}>
                               {preset.name}
                             </span>
                           </button>
@@ -5041,65 +5149,66 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Subtitles Manager Tab */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] tracking-widest text-emerald-400 font-bold uppercase flex items-center gap-1 select-none">
-                        <FileText size={11} />
-                        Edit Subtitle Sentences
-                      </span>
-                      <div className="flex items-center gap-1.5">
+                  {/* 3) Subtitle Segments */}
+                  <div className="p-5 space-y-3">
+                    <div className="flex items-center justify-between select-none">
+                      <div className="flex items-center gap-2">
+                        <div className="h-6 w-6 rounded-lg bg-emerald-50 flex items-center justify-center">
+                          <FileText size={12} className="text-emerald-600" />
+                        </div>
+                        <span className="text-xs font-bold text-zinc-800">Subtitle Segments</span>
                         {editorSubtitles.length > 0 && (
-                          <button
-                            onClick={handleDownloadEditorSubtitles}
-                            className="px-2 py-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 rounded text-[10px] font-bold transition-all cursor-pointer select-none"
-                            title="Download SRT file"
-                          >
-                            Download SRT
-                          </button>
+                          <span className="text-[9px] bg-emerald-50 border border-emerald-200 text-emerald-700 px-1.5 py-0.5 rounded font-bold">{editorSubtitles.length}</span>
                         )}
-                        <button
-                          onClick={handleAddSubtitleItem}
-                          className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold transition-all cursor-pointer border-0 select-none"
-                        >
-                          + Add Segment
-                        </button>
                       </div>
+                      <button
+                        onClick={handleAddSubtitleItem}
+                        className="px-2.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer border-0 select-none"
+                      >
+                        + Add
+                      </button>
                     </div>
 
-                    <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1 scrollbar-thin">
-                      {editorSubtitles.length === 0 ? (
-                        <div className="p-6 text-center text-zinc-500 italic text-[11px] bg-zinc-900/20 border border-zinc-900/65 rounded-xl select-none">
-                          No subtitle segments loaded. Use "Auto Generate" or click "+ Add Segment" to begin.
-                        </div>
-                      ) : (
-                        editorSubtitles.map((sub) => (
-                          <div key={sub.index} className="p-3 bg-zinc-800/80 border border-zinc-750/50 rounded-xl space-y-2">
+                    {/* Skeleton for isAutoCaptioning subtitle list */}
+                    {isAutoCaptioning && editorSubtitles.length === 0 ? (
+                      <div className="space-y-2 animate-pulse select-none">
+                        {[1, 2, 3].map(i => (
+                          <div key={i} className="h-14 bg-zinc-100 rounded-xl"></div>
+                        ))}
+                      </div>
+                    ) : editorSubtitles.length === 0 ? (
+                      <div className="p-5 text-center text-zinc-400 text-[11px] bg-zinc-50 border border-zinc-200/60 rounded-xl select-none leading-relaxed">
+                        No captions yet. Click <strong className="text-zinc-600">"Auto Sync Captions"</strong> to generate them from the video audio, or click <strong className="text-zinc-600">"+ Add"</strong> to write manually.
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                        {editorSubtitles.map((sub) => (
+                          <div key={sub.index} className="p-3 bg-white border border-zinc-200/80 rounded-xl space-y-2 hover:border-zinc-300 transition-colors select-text">
                             <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 select-none">
-                              <span>Segment #{sub.index}</span>
+                              <span className="font-bold text-zinc-500">#{sub.index}</span>
                               <div className="flex items-center gap-1">
-                                <span>Start:</span>
                                 <input
                                   type="number"
                                   step="0.1"
                                   value={sub.start}
                                   onChange={(e) => handleUpdateSubtitleTimes(sub.index, parseFloat(e.target.value) || 0, sub.end)}
-                                  className="w-12 bg-zinc-700 text-white border-0 text-[10px] text-center rounded py-0.5 focus:ring-1 focus:ring-violet-500 outline-none"
+                                  className="w-11 bg-zinc-50 text-zinc-700 border border-zinc-200 text-[10px] text-center rounded-lg py-0.5 focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 outline-none"
                                 />
-                                <span>s | End:</span>
+                                <span className="text-zinc-300">→</span>
                                 <input
                                   type="number"
                                   step="0.1"
                                   value={sub.end}
                                   onChange={(e) => handleUpdateSubtitleTimes(sub.index, sub.start, parseFloat(e.target.value) || 0)}
-                                  className="w-12 bg-zinc-700 text-white border-0 text-[10px] text-center rounded py-0.5 focus:ring-1 focus:ring-violet-500 outline-none"
+                                  className="w-11 bg-zinc-50 text-zinc-700 border border-zinc-200 text-[10px] text-center rounded-lg py-0.5 focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 outline-none"
                                 />
+                                <span className="text-zinc-400 ml-0.5">s</span>
                                 <button
                                   onClick={() => handleDeleteSubtitleItem(sub.index)}
-                                  className="ml-2 px-1 text-rose-400 hover:text-rose-500 font-bold cursor-pointer bg-transparent border-0"
-                                  title="Delete sentence"
+                                  className="ml-1.5 p-0.5 text-zinc-300 hover:text-rose-500 font-bold cursor-pointer bg-transparent border-0 transition-colors"
+                                  title="Delete"
                                 >
-                                  ✕
+                                  <XCircle size={12} />
                                 </button>
                               </div>
                             </div>
@@ -5107,117 +5216,88 @@ export default function Home() {
                               type="text"
                               value={sub.text}
                               onChange={(e) => handleUpdateSubtitleText(sub.index, e.target.value)}
-                              className="w-full bg-zinc-905 border-0 focus:ring-1 focus:ring-violet-500 rounded text-xs text-white px-2 py-1.5 font-light outline-none"
+                              className="w-full bg-zinc-50 border border-zinc-200 focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 rounded-lg text-xs text-zinc-700 px-2.5 py-1.5 font-medium outline-none transition-all"
                             />
                           </div>
-                        ))
-                      )}
-                    </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
-                  {/* Watermarks & Extra Overlays Manager */}
-                  <div className="space-y-3 border-t border-zinc-800 pt-4">
-                    <span className="text-[10px] tracking-widest text-pink-400 font-bold uppercase flex items-center gap-1 select-none">
-                      <Sparkles size={11} />
-                      Add Watermark & Custom Overlays
-                    </span>
+                  {/* 4) Custom Text Overlays / Watermarks */}
+                  <div className="p-5 space-y-3">
+                    <div className="flex items-center gap-2 select-none">
+                      <div className="h-6 w-6 rounded-lg bg-pink-50 flex items-center justify-center">
+                        <Sparkles size={12} className="text-pink-500" />
+                      </div>
+                      <span className="text-xs font-bold text-zinc-800">Watermark & Overlays</span>
+                    </div>
 
-                    {/* Overlay inputs */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-zinc-805/40 p-3 rounded-xl border border-zinc-800">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-zinc-50 border border-zinc-200/70 p-3 rounded-xl">
                       <div className="sm:col-span-2 space-y-1">
-                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">Overlay Text</label>
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wide select-none">Overlay Text</label>
                         <input
                           type="text"
-                          placeholder="e.g. @watermark"
+                          placeholder="e.g. @yourbrand"
                           value={newOverlayText}
                           onChange={(e) => setNewOverlayText(e.target.value)}
-                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1.5 focus:ring-1 focus:ring-violet-500 outline-none"
+                          className="w-full bg-white text-zinc-700 border border-zinc-200 rounded-lg text-xs px-2.5 py-1.5 focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 outline-none transition-all"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">Start Time (sec)</label>
-                        <input
-                          type="number"
-                          value={newOverlayStart}
-                          onChange={(e) => setNewOverlayStart(parseFloat(e.target.value) || 0)}
-                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1 focus:ring-1 focus:ring-violet-500 outline-none"
-                        />
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wide select-none">Start (sec)</label>
+                        <input type="number" value={newOverlayStart} onChange={(e) => setNewOverlayStart(parseFloat(e.target.value) || 0)} className="w-full bg-white text-zinc-700 border border-zinc-200 rounded-lg text-xs px-2 py-1 focus:ring-1 focus:ring-zinc-400 outline-none" />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">End Time (sec)</label>
-                        <input
-                          type="number"
-                          value={newOverlayEnd}
-                          onChange={(e) => setNewOverlayEnd(parseFloat(e.target.value) || 0)}
-                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1 focus:ring-1 focus:ring-violet-500 outline-none"
-                        />
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wide select-none">End (sec)</label>
+                        <input type="number" value={newOverlayEnd} onChange={(e) => setNewOverlayEnd(parseFloat(e.target.value) || 0)} className="w-full bg-white text-zinc-700 border border-zinc-200 rounded-lg text-xs px-2 py-1 focus:ring-1 focus:ring-zinc-400 outline-none" />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">X Pos (0 - 100%)</label>
-                        <input
-                          type="number"
-                          value={newOverlayX}
-                          onChange={(e) => setNewOverlayX(parseInt(e.target.value, 10) || 0)}
-                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1 focus:ring-1 focus:ring-violet-500 outline-none"
-                        />
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wide select-none">X % (0–100)</label>
+                        <input type="number" value={newOverlayX} onChange={(e) => setNewOverlayX(parseInt(e.target.value, 10) || 0)} className="w-full bg-white text-zinc-700 border border-zinc-200 rounded-lg text-xs px-2 py-1 focus:ring-1 focus:ring-zinc-400 outline-none" />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">Y Pos (0 - 100%)</label>
-                        <input
-                          type="number"
-                          value={newOverlayY}
-                          onChange={(e) => setNewOverlayY(parseInt(e.target.value, 10) || 0)}
-                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1 focus:ring-1 focus:ring-violet-500 outline-none"
-                        />
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wide select-none">Y % (0–100)</label>
+                        <input type="number" value={newOverlayY} onChange={(e) => setNewOverlayY(parseInt(e.target.value, 10) || 0)} className="w-full bg-white text-zinc-700 border border-zinc-200 rounded-lg text-xs px-2 py-1 focus:ring-1 focus:ring-zinc-400 outline-none" />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">Font Size (px)</label>
-                        <input
-                          type="number"
-                          value={newOverlayFontSize}
-                          onChange={(e) => setNewOverlayFontSize(parseInt(e.target.value, 10) || 12)}
-                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1 focus:ring-1 focus:ring-violet-500 outline-none"
-                        />
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wide select-none">Font Size (px)</label>
+                        <input type="number" value={newOverlayFontSize} onChange={(e) => setNewOverlayFontSize(parseInt(e.target.value, 10) || 12)} className="w-full bg-white text-zinc-700 border border-zinc-200 rounded-lg text-xs px-2 py-1 focus:ring-1 focus:ring-zinc-400 outline-none" />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[9px] text-zinc-400 font-bold uppercase select-none">Color Hex</label>
-                        <input
-                          type="text"
-                          value={newOverlayColor}
-                          onChange={(e) => setNewOverlayColor(e.target.value)}
-                          className="w-full bg-zinc-850 text-white border-0 rounded text-xs px-2 py-1 focus:ring-1 focus:ring-violet-500 outline-none"
-                        />
+                        <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wide select-none">Text Color</label>
+                        <input type="text" value={newOverlayColor} onChange={(e) => setNewOverlayColor(e.target.value)} className="w-full bg-white text-zinc-700 border border-zinc-200 rounded-lg text-xs px-2 py-1 focus:ring-1 focus:ring-zinc-400 outline-none" />
                       </div>
-                      <div className="sm:col-span-2 pt-2">
+                      <div className="sm:col-span-2 pt-1">
                         <button
                           onClick={handleAddExtraOverlay}
-                          className="w-full py-2.5 bg-pink-600 hover:bg-pink-700 text-white rounded text-xs font-bold transition-all cursor-pointer border-0"
+                          className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-xs font-bold transition-all cursor-pointer border-0 flex items-center justify-center gap-1.5 select-none"
                         >
-                          + Add Custom Overlay
+                          + Add Overlay to Video
                         </button>
                       </div>
                     </div>
 
-                    {/* List of active overlays */}
                     {editorExtraOverlays.length > 0 && (
-                      <div className="space-y-2 mt-2 max-h-[140px] overflow-y-auto scrollbar-thin">
+                      <div className="space-y-1.5 max-h-36 overflow-y-auto">
                         {editorExtraOverlays.map((o) => (
-                          <div key={o.id} className="flex justify-between items-center text-[11px] bg-zinc-800 p-2.5 rounded-lg border border-zinc-700/40">
+                          <div key={o.id} className="flex justify-between items-center text-[11px] bg-white border border-zinc-200 p-2.5 rounded-xl select-text">
                             <div className="truncate flex-1 pr-2">
-                              <span className="font-bold text-pink-400">"{o.text}"</span>
-                              <span className="text-zinc-500 text-[10px] ml-1.5 font-mono select-none">({o.start}s - {o.end}s, X:{o.x}%, Y:{o.y}%)</span>
+                              <span className="font-bold text-zinc-700">"{o.text}"</span>
+                              <span className="text-zinc-400 text-[10px] ml-1.5 font-mono">({o.start}s–{o.end}s)</span>
                             </div>
                             <button
                               onClick={() => handleDeleteExtraOverlay(o.id)}
-                              className="text-rose-400 hover:text-rose-500 font-bold px-1.5 cursor-pointer bg-transparent border-0"
+                              className="text-zinc-300 hover:text-rose-500 font-bold px-1 cursor-pointer bg-transparent border-0 transition-colors"
                             >
-                              ✕
+                              <XCircle size={13} />
                             </button>
                           </div>
                         ))}
                       </div>
                     )}
                   </div>
+
                 </div>
               </div>
             )}
@@ -5226,6 +5306,9 @@ export default function Home() {
           </div>
         )}
       </main>
+
+
+
 
       {/* Premium SEO directory footer */}
       <footer className="mt-6 mb-2 w-full max-w-xl mx-auto border-t border-zinc-200/60 pt-4 px-4 text-center select-none">

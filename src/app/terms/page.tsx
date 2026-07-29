@@ -11,7 +11,7 @@ export default function TermsPage() {
   return (
     <div className="min-h-screen bg-[#fcfcfc] text-zinc-800 flex flex-col justify-start items-center px-4 py-16 relative overflow-hidden dots-bg font-sans select-text">
       {/* Background Ambient Glows */}
-      <div className="absolute top-1/4 left-1/3 w-[500px] h-[500px] bg-violet-600/5 blur-[140px] rounded-full pointer-events-none"></div>
+      <div className="absolute top-1/4 left-1/3 w-125 h-125 bg-violet-600/5 blur-[140px] rounded-full pointer-events-none"></div>
 
       <div className="w-full max-w-2xl bg-white/70 border border-zinc-200/80 rounded-3xl p-6 sm:p-10 shadow-2xl backdrop-blur-xl relative z-10 space-y-8 animate-scale-up-in">
         

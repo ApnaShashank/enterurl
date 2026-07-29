@@ -11,7 +11,7 @@ export default function AboutPage() {
   return (
     <div className="min-h-screen bg-[#fcfcfc] text-zinc-800 flex flex-col justify-start items-center px-4 py-16 relative overflow-hidden dots-bg font-sans select-text">
       {/* Background Ambient Glows */}
-      <div className="absolute top-1/4 left-1/3 w-[500px] h-[500px] bg-violet-600/5 blur-[140px] rounded-full pointer-events-none"></div>
+      <div className="absolute top-1/4 left-1/3 w-125 h-125 bg-violet-600/5 blur-[140px] rounded-full pointer-events-none"></div>
 
       <div className="w-full max-w-2xl bg-white/70 border border-zinc-200/80 rounded-3xl p-6 sm:p-10 shadow-2xl backdrop-blur-xl relative z-10 space-y-8 animate-scale-up-in">
         
@@ -122,7 +122,7 @@ export default function AboutPage() {
           </div>
 
           {/* Creator Showcase Card */}
-          <div className="bg-gradient-to-br from-violet-50/50 to-fuchsia-50/30 border border-violet-100 rounded-2xl p-5 sm:p-6 space-y-4 select-none">
+          <div className="bg-linear-to-br from-violet-50/50 to-fuchsia-50/30 border border-violet-100 rounded-2xl p-5 sm:p-6 space-y-4 select-none">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 bg-violet-600 text-white rounded-xl flex items-center justify-center font-black text-sm shadow-md">
                 SG

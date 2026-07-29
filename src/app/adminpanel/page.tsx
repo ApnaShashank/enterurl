@@ -351,7 +351,7 @@ export default function AdminPanel() {
     return (
       <div className="min-h-screen bg-[#fcfcfc] flex flex-col justify-center items-center px-4 relative overflow-hidden dots-bg">
         {/* Background Ambient Glows */}
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-violet-600/5 blur-[120px] rounded-full pointer-events-none"></div>
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-100 h-100 bg-violet-600/5 blur-[120px] rounded-full pointer-events-none"></div>
 
         <div className="w-full max-w-md bg-white/80 backdrop-blur-xl border border-zinc-200/80 rounded-3xl p-8 shadow-2xl relative z-10 animate-slide-up-in">
           <div className="text-center mb-8 select-none">
@@ -401,7 +401,7 @@ export default function AdminPanel() {
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-800 flex flex-col font-sans relative overflow-hidden dots-bg">
       {/* Ambient background glows */}
-      <div className="absolute top-0 right-0 w-[50vw] h-[50vh] bg-gradient-to-bl from-violet-600/5 to-transparent pointer-events-none z-0"></div>
+      <div className="absolute top-0 right-0 w-[50vw] h-[50vh] bg-linear-to-bl from-violet-600/5 to-transparent pointer-events-none z-0"></div>
 
       {/* Top Navbar */}
       <header className="border-b border-zinc-200/80 bg-white/80 backdrop-blur sticky top-0 z-40 px-6 py-4 flex justify-between items-center text-zinc-800 shadow-sm select-none">
@@ -426,7 +426,7 @@ export default function AdminPanel() {
       </header>
 
       {/* Main Container */}
-      <main className="flex-grow p-6 space-y-8 max-w-7xl mx-auto w-full z-10">
+      <main className="grow p-6 space-y-8 max-w-7xl mx-auto w-full z-10">
         
         {/* KPI Metrics row */}
         {metrics && (
@@ -588,7 +588,7 @@ export default function AdminPanel() {
             <div className="flex flex-wrap gap-2 w-full md:w-auto items-center">
               {activeTab === 'logs' && (
                 <>
-                  <div className="relative flex-grow md:flex-grow-0 md:w-60">
+                  <div className="relative grow md:grow-0 md:w-60">
                     <input
                       type="text"
                       placeholder="Search by IP or URL..."
@@ -653,7 +653,7 @@ export default function AdminPanel() {
                     <th className="p-4 w-40">User Email</th>
                     <th className="p-4 w-36">Action</th>
                     <th className="p-4 w-28">Platform</th>
-                    <th className="p-4 min-w-[200px]">URL / Resource</th>
+                    <th className="p-4 min-w-50">URL / Resource</th>
                     <th className="p-4 w-28">APIs Called</th>
                     <th className="p-4 w-20">Status</th>
                   </tr>
@@ -732,9 +732,9 @@ export default function AdminPanel() {
                   <tr className="bg-zinc-100/85 border-b border-zinc-200/60 text-zinc-500 font-bold uppercase tracking-wider select-none">
                     <th className="p-4 w-44">Timestamp</th>
                     <th className="p-4 w-36">IP Address</th>
-                    <th className="p-4 min-w-[200px]">URL / Resource</th>
-                    <th className="p-4 min-w-[150px]">Error Message</th>
-                    <th className="p-4 min-w-[250px]">User Feedback</th>
+                    <th className="p-4 min-w-50">URL / Resource</th>
+                    <th className="p-4 min-w-37.5">Error Message</th>
+                    <th className="p-4 min-w-62.5">User Feedback</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200/50 select-text text-zinc-700">

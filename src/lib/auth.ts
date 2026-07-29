@@ -48,12 +48,20 @@ export async function getCurrentUser() {
     if (token) {
       const decoded = verifyToken(token);
       if (decoded) {
-        await connectToDatabase();
-        const user = await User.findOne({ email: decoded.email.toLowerCase() });
-        if (user) {
+        try {
+          await connectToDatabase();
+          const user = await User.findOne({ email: decoded.email.toLowerCase() });
+          if (user) {
+            return {
+              email: user.email,
+              role: user.role as 'standard' | 'pro' | 'admin'
+            };
+          }
+        } catch (dbErr: any) {
+          console.warn('getCurrentUser DB connection failed, using verified token data:', dbErr.message);
           return {
-            email: user.email,
-            role: user.role as 'standard' | 'pro' | 'admin'
+            email: decoded.email,
+            role: (decoded.role || 'standard') as 'standard' | 'pro' | 'admin'
           };
         }
       }
@@ -71,33 +79,41 @@ export async function checkFeaturePermission(featureName: string): Promise<{
   requiredLevel: 'free' | 'registered' | 'pro';
   user: { email: string; role: 'standard' | 'pro' | 'admin' } | null;
 }> {
+  const defaultTiers: Record<string, 'free' | 'registered' | 'pro'> = {
+    'analyze-intel': 'registered',
+    'analyze-lighthouse': 'free',
+    'analyze-ai-research': 'registered',
+    'analyze-ai-writer': 'pro',
+    'download-media': 'free',
+    'transcribe': 'registered',
+    'remove-bg': 'pro',
+    'screenshot': 'registered'
+  };
+
+  const defaultLevel = defaultTiers[featureName] || 'registered';
+  let requiredLevel = defaultLevel;
+  let user: { email: string; role: 'standard' | 'pro' | 'admin' } | null = null;
+
   try {
     const { connectToDatabase } = await import('@/lib/db');
     const ApiConfig = (await import('@/models/ApiConfig')).default;
 
-    await connectToDatabase();
-    const config = await ApiConfig.findOne({ featureName });
-    
-    // Map of default tiers if not configured in DB
-    const defaultTiers: Record<string, 'free' | 'registered' | 'pro'> = {
-      'analyze-intel': 'registered',
-      'analyze-lighthouse': 'free',
-      'analyze-ai-research': 'registered',
-      'analyze-ai-writer': 'pro',
-      'download-media': 'free',
-      'transcribe': 'registered',
-      'remove-bg': 'pro',
-      'screenshot': 'registered'
-    };
-
-    const requiredLevel = config ? config.requiredLevel : (defaultTiers[featureName] || 'registered');
+    try {
+      await connectToDatabase();
+      const config = await ApiConfig.findOne({ featureName });
+      if (config) {
+        requiredLevel = config.requiredLevel;
+      }
+    } catch (dbErr: any) {
+      console.warn(`checkFeaturePermission DB connection failed for ${featureName}, using default level:`, dbErr.message);
+    }
 
     if (requiredLevel === 'free') {
-      const user = await getCurrentUser();
+      user = await getCurrentUser();
       return { authorized: true, requiredLevel, user };
     }
 
-    const user = await getCurrentUser();
+    user = await getCurrentUser();
     if (!user) {
       return { authorized: false, requiredLevel, user: null };
     }
@@ -116,7 +132,7 @@ export async function checkFeaturePermission(featureName: string): Promise<{
     return { authorized: false, requiredLevel, user };
   } catch (err) {
     console.error('checkFeaturePermission error:', err);
-    return { authorized: false, requiredLevel: 'registered', user: null };
+    return { authorized: requiredLevel === 'free', requiredLevel, user: null };
   }
 }
 
