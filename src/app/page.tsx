@@ -32,7 +32,11 @@ import {
   CheckCircle,
   XCircle,
   AlertTriangle,
-  FileText
+  FileText,
+  LogOut,
+  ChevronDown,
+  Activity,
+  Shield
 } from 'lucide-react';
 import exifr from 'exifr';
 import QRCode from 'qrcode';
@@ -554,12 +558,14 @@ export default function Home() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
 
   // User Authentication States
-  const [currentUser, setCurrentUser] = useState<{ email: string; role: 'standard' | 'pro' | 'admin' } | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ email: string; role: 'standard' | 'pro' | 'admin'; scansCountToday?: number } | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'signup' | 'login'>('signup');
   const [authModalRequiredLevel, setAuthModalRequiredLevel] = useState<'registered' | 'pro'>('registered');
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
 
   // Fetch session on load
   useEffect(() => {
@@ -572,6 +578,35 @@ export default function Home() {
       })
       .catch(err => console.error('Failed to fetch session:', err));
   }, []);
+
+  // Update session stats when profile dropdown is opened
+  useEffect(() => {
+    if (isProfileMenuOpen && currentUser) {
+      fetch('/api/auth/me')
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && data.user) {
+            setCurrentUser(data.user);
+          }
+        })
+        .catch(err => console.error('Failed to update stats:', err));
+    }
+  }, [isProfileMenuOpen]);
+
+  // Close profile dropdown menu when clicking outside
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
+        setIsProfileMenuOpen(false);
+      }
+    };
+    if (isProfileMenuOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [isProfileMenuOpen]);
 
   const handleGoogleLoginSuccess = async (response: any) => {
     setIsAuthLoading(true);
@@ -2206,29 +2241,101 @@ export default function Home() {
     <div className="relative flex flex-col items-center justify-between h-screen max-h-screen overflow-hidden z-10 px-4 md:px-8 py-4 md:py-6 dots-bg select-none">
       
       {/* Floating User Account Pill at top right */}
-      <div className="absolute top-6 right-6 z-35 flex items-center gap-2">
+      <div className="absolute top-6 right-6 z-40" ref={profileMenuRef}>
         {currentUser ? (
-          <div className="flex items-center gap-2 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-xl border border-zinc-200/50 dark:border-zinc-800/40 rounded-full px-4 py-2 text-xs text-zinc-700 dark:text-zinc-305 shadow-lg select-text">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span className="font-mono max-w-[120px] truncate">{currentUser.email}</span>
-            <span className="px-1.5 py-0.5 bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-400 rounded-md text-[9px] font-bold uppercase tracking-wider">
-              {currentUser.role}
-            </span>
-            {currentUser.role === 'admin' && (
-              <a 
-                href="/adminpanel" 
-                target="_blank"
-                className="text-violet-650 hover:text-violet-750 dark:text-violet-400 text-[10px] font-semibold border-l border-zinc-200 dark:border-zinc-800 pl-2 ml-1"
-              >
-                Admin
-              </a>
-            )}
-            <button 
-              onClick={handleLogout} 
-              className="text-zinc-400 hover:text-zinc-650 dark:hover:text-white transition-colors cursor-pointer border-l border-zinc-200 dark:border-zinc-800 pl-2 ml-1 text-[10px] font-semibold"
+          <div className="relative">
+            {/* Interactive Glowing Avatar */}
+            <button
+              onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+              className="flex items-center gap-2 p-1.5 pr-3 bg-white/90 dark:bg-zinc-900/80 backdrop-blur-xl border border-zinc-200/50 dark:border-zinc-800/40 rounded-full hover:border-zinc-350 dark:hover:border-zinc-700 transition-all shadow-md active:scale-98 cursor-pointer select-none"
             >
-              Logout
+              <div className="h-7 w-7 rounded-full bg-gradient-to-tr from-violet-650 to-pink-500 flex items-center justify-center text-white font-extrabold text-[11px] shadow-sm select-none border border-white/20">
+                {currentUser.email.charAt(0).toUpperCase()}
+              </div>
+              <span className="hidden sm:inline-block font-mono text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 max-w-[90px] truncate select-none">
+                {currentUser.email.split('@')[0]}
+              </span>
+              <ChevronDown size={11} className={`text-zinc-400 dark:text-zinc-500 transition-transform duration-300 ${isProfileMenuOpen ? 'rotate-180' : ''}`} />
             </button>
+
+            {/* Account Details dropdown card */}
+            {isProfileMenuOpen && (
+              <div className="absolute right-0 mt-2.5 w-64 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl border border-zinc-200/60 dark:border-zinc-800/60 rounded-2xl p-4 shadow-2xl select-text animate-scale-up-in">
+                {/* Header info */}
+                <div className="flex items-center gap-3 select-none mb-3">
+                  <div className="h-9 w-9 rounded-full bg-gradient-to-tr from-violet-650 to-pink-500 flex items-center justify-center text-white font-black text-xs shadow-inner">
+                    {currentUser.email.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-xs font-bold text-zinc-900 dark:text-zinc-50 truncate leading-none mb-1">{currentUser.email}</p>
+                    <span className="inline-block px-1.5 py-0.5 bg-violet-100/90 text-violet-750 dark:bg-violet-950/40 dark:text-violet-400 rounded text-[9px] font-black uppercase tracking-wider">
+                      {currentUser.role}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="border-t border-zinc-150/60 dark:border-zinc-800/60 my-2 select-none"></div>
+
+                {/* Scans stats and limits */}
+                <div className="space-y-3 py-1 text-[11px] select-none text-zinc-500 dark:text-zinc-400">
+                  <div className="flex items-center justify-between font-medium">
+                    <span className="flex items-center gap-1.5">
+                      <Activity size={12} className="text-zinc-400" />
+                      Scans Done (24h)
+                    </span>
+                    <strong className="text-zinc-800 dark:text-zinc-200 font-bold">{currentUser.scansCountToday ?? 0}</strong>
+                  </div>
+
+                  <div className="flex items-center justify-between font-medium">
+                    <span className="flex items-center gap-1.5">
+                      <Shield size={12} className="text-zinc-400" />
+                      Base Scan Limit
+                    </span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wide text-[9px]">Unlimited</span>
+                  </div>
+
+                  {/* Feature check lists */}
+                  <div className="mt-1 pt-2 border-t border-zinc-100/50 dark:border-zinc-800/40 space-y-1.5 text-[10px] text-zinc-400">
+                    <div className="flex justify-between items-center">
+                      <span>AI Research & Screenshots:</span>
+                      <span className="text-emerald-500 font-medium">✓ Enabled</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span>Premium Tools (AI Writer, OCR):</span>
+                      {currentUser.role === 'pro' || currentUser.role === 'admin' ? (
+                        <span className="text-emerald-500 font-medium">✓ Enabled</span>
+                      ) : (
+                        <span className="text-zinc-400 font-medium">🔒 Pro Required</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-zinc-150/60 dark:border-zinc-800/60 my-2 select-none"></div>
+
+                {/* Dropdown footer actions */}
+                <div className="space-y-1 select-none">
+                  {currentUser.role === 'admin' && (
+                    <a
+                      href="/adminpanel"
+                      target="_blank"
+                      className="w-full py-2 px-3 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 text-zinc-700 dark:text-zinc-305 hover:text-zinc-900 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all border border-transparent"
+                    >
+                      <UserIcon size={12} />
+                      <span>Admin Control Panel</span>
+                    </a>
+                  )}
+
+                  <button
+                    onClick={handleLogout}
+                    className="w-full py-2 px-3 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-600 dark:text-rose-400 hover:text-rose-700 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all border-0 bg-transparent cursor-pointer text-left"
+                  >
+                    <LogOut size={12} />
+                    <span>Logout Session</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <button
