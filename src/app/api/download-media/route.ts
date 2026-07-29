@@ -3,11 +3,11 @@ import { connectToDatabase } from '@/lib/db';
 import ApiUsageLog from '@/models/ApiUsageLog';
 
 const COBALT_INSTANCES = [
-  'https://api.cobalt.liubquanti.click',
   'https://cobaltapi.cjs.nz',
   'https://cobaltapi.kittycat.boo',
-  'https://cobalt.moe/api',
+  'https://api.cobalt.liubquanti.click',
   'https://cobalt.drgns.space',
+  'https://cobalt.moe/api',
   'https://cobalt.k6.vc',
   'https://cobalt.sh1nypanda.com'
 ];

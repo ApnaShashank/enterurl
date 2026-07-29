@@ -1652,7 +1652,12 @@ export default function Home() {
     if (!mediaUrl) return;
     const downloadFilename = title ? title.replace(/[^a-z0-9]/gi, '_').toLowerCase() : 'download';
     const proxyUrl = `/api/download?url=${encodeURIComponent(mediaUrl)}&filename=${encodeURIComponent(downloadFilename)}`;
-    window.open(proxyUrl, '_blank');
+    const a = document.createElement('a');
+    a.href = proxyUrl;
+    a.download = downloadFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   const handleDownloadSubtitles = async () => {
@@ -1770,7 +1775,12 @@ export default function Home() {
         setTimeout(() => setIsDownloadingVideo(false), 800);
       }
 
-      window.open(proxyUrl, '_blank');
+      const a = document.createElement('a');
+      a.href = proxyUrl;
+      a.download = cleanTitle + '.' + ext;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
 
     } catch (err: any) {
       console.error(err);
