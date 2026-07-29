@@ -2233,9 +2233,9 @@ export default function Home() {
 
   const assetBadges = getAssetBadges();
 
-  const currentPlatformKey = (isPlatformMatched || result)
-    ? (result?.platform || matchedPlatform || 'website')
-    : getPlatformMatchKey(rollingIndex);
+  const displayEmail = currentUser ? currentUser.email.replace(/^www\./i, '') : '';
+  const displayHandle = displayEmail.split('@')[0];
+  const displayInitial = displayHandle.charAt(0).toUpperCase();
 
   return (
     <div className="relative flex flex-col items-center justify-between h-screen max-h-screen overflow-hidden z-10 px-4 md:px-8 py-4 md:py-6 dots-bg select-none">
@@ -2247,71 +2247,71 @@ export default function Home() {
             {/* Interactive Glowing Avatar */}
             <button
               onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-              className="flex items-center gap-2 p-1.5 pr-3 bg-white/90 dark:bg-zinc-900/80 backdrop-blur-xl border border-zinc-200/50 dark:border-zinc-800/40 rounded-full hover:border-zinc-350 dark:hover:border-zinc-700 transition-all shadow-md active:scale-98 cursor-pointer select-none"
+              className="flex items-center gap-2 p-1 bg-white border border-zinc-200 hover:border-zinc-300 rounded-full hover:bg-zinc-50/50 transition-all shadow-sm active:scale-98 cursor-pointer select-none"
             >
-              <div className="h-7 w-7 rounded-full bg-gradient-to-tr from-violet-650 to-pink-500 flex items-center justify-center text-white font-extrabold text-[11px] shadow-sm select-none border border-white/20">
-                {currentUser.email.charAt(0).toUpperCase()}
+              <div className="h-7 w-7 rounded-full bg-gradient-to-tr from-violet-600 to-pink-500 flex items-center justify-center text-white font-extrabold text-[11px] shadow-sm select-none border border-white/20">
+                {displayInitial}
               </div>
-              <span className="hidden sm:inline-block font-mono text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 max-w-[90px] truncate select-none">
-                {currentUser.email.split('@')[0]}
+              <span className="hidden sm:inline-block font-sans text-xs font-semibold text-zinc-700 max-w-[120px] truncate select-none pl-1">
+                {displayHandle}
               </span>
-              <ChevronDown size={11} className={`text-zinc-400 dark:text-zinc-500 transition-transform duration-300 ${isProfileMenuOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown size={12} className={`text-zinc-400 mr-2 transition-transform duration-300 ${isProfileMenuOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {/* Account Details dropdown card */}
             {isProfileMenuOpen && (
-              <div className="absolute right-0 mt-2.5 w-64 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl border border-zinc-200/60 dark:border-zinc-800/60 rounded-2xl p-4 shadow-2xl select-text animate-scale-up-in">
+              <div className="absolute right-0 mt-2.5 w-64 bg-white border border-zinc-200/80 rounded-2xl p-4 shadow-xl select-text animate-scale-up-in">
                 {/* Header info */}
                 <div className="flex items-center gap-3 select-none mb-3">
-                  <div className="h-9 w-9 rounded-full bg-gradient-to-tr from-violet-650 to-pink-500 flex items-center justify-center text-white font-black text-xs shadow-inner">
-                    {currentUser.email.charAt(0).toUpperCase()}
+                  <div className="h-9 w-9 rounded-full bg-gradient-to-tr from-violet-600 to-pink-500 flex items-center justify-center text-white font-black text-xs shadow-sm">
+                    {displayInitial}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="font-mono text-xs font-bold text-zinc-900 dark:text-zinc-50 truncate leading-none mb-1">{currentUser.email}</p>
-                    <span className="inline-block px-1.5 py-0.5 bg-violet-100/90 text-violet-750 dark:bg-violet-950/40 dark:text-violet-400 rounded text-[9px] font-black uppercase tracking-wider">
-                      {currentUser.role}
+                    <p className="font-sans text-xs font-bold text-zinc-800 truncate leading-none mb-1">{displayEmail}</p>
+                    <span className="inline-block px-1.5 py-0.5 bg-violet-50 border border-violet-100 text-violet-750 rounded text-[9px] font-bold uppercase tracking-wider">
+                      {currentUser.role} Account
                     </span>
                   </div>
                 </div>
 
-                <div className="border-t border-zinc-150/60 dark:border-zinc-800/60 my-2 select-none"></div>
+                <div className="border-t border-zinc-100 my-2 select-none"></div>
 
                 {/* Scans stats and limits */}
-                <div className="space-y-3 py-1 text-[11px] select-none text-zinc-500 dark:text-zinc-400">
+                <div className="space-y-3 py-1 text-[11px] select-none text-zinc-500">
                   <div className="flex items-center justify-between font-medium">
                     <span className="flex items-center gap-1.5">
                       <Activity size={12} className="text-zinc-400" />
-                      Scans Done (24h)
+                      Scans Used Today
                     </span>
-                    <strong className="text-zinc-800 dark:text-zinc-200 font-bold">{currentUser.scansCountToday ?? 0}</strong>
+                    <strong className="text-zinc-800 font-bold">{currentUser.scansCountToday ?? 0} scans</strong>
                   </div>
 
                   <div className="flex items-center justify-between font-medium">
                     <span className="flex items-center gap-1.5">
                       <Shield size={12} className="text-zinc-400" />
-                      Base Scan Limit
+                      Daily Base Limit
                     </span>
-                    <span className="text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wide text-[9px]">Unlimited</span>
+                    <span className="text-emerald-600 font-bold uppercase tracking-wide text-[9px]">Unlimited</span>
                   </div>
 
                   {/* Feature check lists */}
-                  <div className="mt-1 pt-2 border-t border-zinc-100/50 dark:border-zinc-800/40 space-y-1.5 text-[10px] text-zinc-400">
+                  <div className="mt-1 pt-2 border-t border-zinc-100 space-y-1.5 text-[10px] text-zinc-450">
                     <div className="flex justify-between items-center">
-                      <span>AI Research & Screenshots:</span>
-                      <span className="text-emerald-500 font-medium">✓ Enabled</span>
+                      <span>Standard Tools:</span>
+                      <span className="text-emerald-600 font-semibold">✓ Unlimited Access</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>Premium Tools (AI Writer, OCR):</span>
                       {currentUser.role === 'pro' || currentUser.role === 'admin' ? (
-                        <span className="text-emerald-500 font-medium">✓ Enabled</span>
+                        <span className="text-emerald-600 font-semibold">✓ Unlimited Access</span>
                       ) : (
-                        <span className="text-zinc-400 font-medium">🔒 Pro Required</span>
+                        <span className="text-zinc-400 font-medium">🔒 Pro Upgrade Required</span>
                       )}
                     </div>
                   </div>
                 </div>
 
-                <div className="border-t border-zinc-150/60 dark:border-zinc-800/60 my-2 select-none"></div>
+                <div className="border-t border-zinc-100 my-2 select-none"></div>
 
                 {/* Dropdown footer actions */}
                 <div className="space-y-1 select-none">
@@ -2319,7 +2319,7 @@ export default function Home() {
                     <a
                       href="/adminpanel"
                       target="_blank"
-                      className="w-full py-2 px-3 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 text-zinc-700 dark:text-zinc-305 hover:text-zinc-900 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all border border-transparent"
+                      className="w-full py-2 px-3 hover:bg-zinc-50 text-zinc-650 hover:text-zinc-800 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all border border-transparent"
                     >
                       <UserIcon size={12} />
                       <span>Admin Control Panel</span>
@@ -2328,10 +2328,10 @@ export default function Home() {
 
                   <button
                     onClick={handleLogout}
-                    className="w-full py-2 px-3 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-600 dark:text-rose-400 hover:text-rose-700 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all border-0 bg-transparent cursor-pointer text-left"
+                    className="w-full py-2 px-3 hover:bg-rose-50/50 text-rose-600 hover:text-rose-700 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all border-0 bg-transparent cursor-pointer text-left"
                   >
                     <LogOut size={12} />
-                    <span>Logout Session</span>
+                    <span>Sign Out</span>
                   </button>
                 </div>
               </div>
